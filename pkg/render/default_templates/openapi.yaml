@@ -67,6 +67,32 @@ paths:
                     type: array
                     items:
                       type: object
+  /registry.json:
+    get:
+      operationId: listAllCredentials
+      summary: List all credentials (legacy)
+      description: |
+        Returns all registered credentials including both TS11-compliant
+        and non-TS11 legacy VCTM-only entries. Unsigned JSON.
+      responses:
+        '200':
+          description: All registered credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LegacyRegistryPayload'
+  /openapi.yaml:
+    get:
+      operationId: getOpenAPISpec
+      summary: Get the OpenAPI specification
+      description: Returns this OpenAPI 3.1.0 specification document.
+      responses:
+        '200':
+          description: OpenAPI specification
+          content:
+            application/x-yaml:
+              schema:
+                type: string
 components:
   schemas:
     SchemaMeta:
@@ -132,3 +158,26 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/SchemaMeta'
+    LegacyRegistryPayload:
+      type: object
+      properties:
+        total:
+          type: integer
+        credentials:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+                format: uuid
+              version:
+                type: string
+              supportedFormats:
+                type: array
+                items:
+                  type: string
+              attestationLoS:
+                type: string
+              bindingType:
+                type: string

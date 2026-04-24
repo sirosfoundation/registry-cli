@@ -177,6 +177,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing OpenAPI spec: %w", err)
 	}
 
+	// 7b. Write DCAT-AP catalog for machine discovery
+	if err := writeDCATCatalog(flagOutput, flagBaseURL, schemas, siteData.BuildTime); err != nil {
+		return fmt.Errorf("writing DCAT catalog: %w", err)
+	}
+
 	// 8. Copy static assets
 	if flagStatic != "" {
 		staticDst := filepath.Join(flagOutput, "static")
@@ -527,6 +532,79 @@ func writeOpenAPISpec(outputDir string) error {
 		return err
 	}
 	return render.WriteOpenAPISpec(filepath.Join(apiDir, "openapi.yaml"))
+}
+
+func writeDCATCatalog(outputDir, baseURL string, schemas []*schemameta.SchemaMeta, buildTime string) error {
+	type distribution struct {
+		Type      string `json:"@type"`
+		AccessURL string `json:"dcat:accessURL"`
+		MediaType string `json:"dcat:mediaType"`
+		Title     string `json:"dcterms:title"`
+	}
+	type dataset struct {
+		Type        string         `json:"@type"`
+		Identifier  string         `json:"dcterms:identifier"`
+		Title       string         `json:"dcterms:title"`
+		Description string         `json:"dcterms:description,omitempty"`
+		Distribution []distribution `json:"dcat:distribution,omitempty"`
+	}
+	type catalog struct {
+		Context     any       `json:"@context"`
+		Type        string    `json:"@type"`
+		Title       string    `json:"dcterms:title"`
+		Description string    `json:"dcterms:description"`
+		Publisher   any       `json:"dcterms:publisher"`
+		Modified    string    `json:"dcterms:modified"`
+		Homepage    string    `json:"foaf:homepage"`
+		Datasets    []dataset `json:"dcat:dataset"`
+	}
+
+	var datasets []dataset
+	for _, sm := range schemas {
+		ds := dataset{
+			Type:       "dcat:Dataset",
+			Identifier: sm.ID,
+			Title:      sm.ID,
+			Description: "Attestation schema (formats: " + strings.Join(sm.SupportedFormats, ", ") + ")",
+			Distribution: []distribution{
+				{
+					Type:      "dcat:Distribution",
+					AccessURL: baseURL + "/api/v1/schemas/" + sm.ID + ".json",
+					MediaType: "application/json",
+					Title:     "Schema metadata (JSON)",
+				},
+			},
+		}
+		datasets = append(datasets, ds)
+	}
+
+	cat := catalog{
+		Context: []any{
+			"https://www.w3.org/ns/dcat",
+			map[string]string{
+				"dcterms": "http://purl.org/dc/terms/",
+				"dcat":    "http://www.w3.org/ns/dcat#",
+				"foaf":    "http://xmlns.com/foaf/0.1/",
+			},
+		},
+		Type:        "dcat:Catalog",
+		Title:       "SIROS Credential Type Registry",
+		Description: "Catalogue of Attestations implementing ETSI TS11",
+		Publisher: map[string]string{
+			"@type":     "foaf:Organization",
+			"foaf:name": "SIROS Foundation",
+		},
+		Modified: buildTime,
+		Homepage: baseURL,
+		Datasets: datasets,
+	}
+
+	data, err := json.MarshalIndent(cat, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling DCAT catalog: %w", err)
+	}
+
+	return os.WriteFile(filepath.Join(outputDir, "catalog.jsonld"), data, 0o644)
 }
 
 func prettyFormatJSON(data []byte) string {
