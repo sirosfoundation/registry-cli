@@ -69,4 +69,5 @@ type FormatInfo struct {
 type OrgData struct {
 	Name        string
 	Credentials []CredentialData
+	HasTS11     bool
 }

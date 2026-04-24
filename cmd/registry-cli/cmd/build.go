@@ -127,7 +127,14 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 	var orgs []render.OrgData
 	for orgName, orgCreds := range orgMap {
-		orgs = append(orgs, render.OrgData{Name: orgName, Credentials: orgCreds})
+		hasTS11 := false
+		for _, c := range orgCreds {
+			if c.TS11Compliant {
+				hasTS11 = true
+				break
+			}
+		}
+		orgs = append(orgs, render.OrgData{Name: orgName, Credentials: orgCreds, HasTS11: hasTS11})
 	}
 
 	siteData := render.SiteData{
