@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -104,7 +105,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 
 	// 6. Render HTML site (all credentials, with TS11 compliance flag)
-	credentials, err := buildCredentialData(repos, workDir, schemas, flagBaseURL, ts11Compliant)
+	credentials, err := buildCredentialData(repos, workDir, flagOutput, schemas, flagBaseURL, ts11Compliant)
 	if err != nil {
 		return fmt.Errorf("building credential data: %w", err)
 	}
@@ -114,10 +115,21 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("creating renderer: %w", err)
 	}
 
+	// Group credentials by org
+	orgMap := make(map[string][]render.CredentialData)
+	for _, cred := range credentials {
+		orgMap[cred.Org] = append(orgMap[cred.Org], cred)
+	}
+	var orgs []render.OrgData
+	for orgName, orgCreds := range orgMap {
+		orgs = append(orgs, render.OrgData{Name: orgName, Credentials: orgCreds})
+	}
+
 	siteData := render.SiteData{
 		BaseURL:     flagBaseURL,
 		Credentials: credentials,
 		BuildTime:   time.Now().UTC().Format(time.RFC3339),
+		Orgs:        orgs,
 	}
 
 	if err := renderer.RenderIndex(flagOutput, siteData); err != nil {
@@ -129,6 +141,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		}
 		if err := renderer.RenderRulebook(flagOutput, cred); err != nil {
 			return fmt.Errorf("rendering rulebook %s/%s: %w", cred.Org, cred.Slug, err)
+		}
+	}
+	for _, orgData := range orgs {
+		if err := renderer.RenderOrg(flagOutput, orgData); err != nil {
+			return fmt.Errorf("rendering org %s: %w", orgData.Name, err)
 		}
 	}
 	if err := renderer.RenderTS11Docs(flagOutput, siteData); err != nil {
@@ -300,13 +317,11 @@ func cloneRepo(url, branch, dest string) error {
 }
 
 // buildCredentialData constructs render.CredentialData for each schema,
-// including rulebook rendering if a rulebook.md is present.
-func buildCredentialData(repos []discovery.ResolvedRepo, workDir string, schemas []*schemameta.SchemaMeta, baseURL string, ts11Compliant map[string]bool) ([]render.CredentialData, error) {
-	// Build a map of org → schema for lookup
+// including VCTM content, format files, and rulebook rendering.
+func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir string, schemas []*schemameta.SchemaMeta, baseURL string, ts11Compliant map[string]bool) ([]render.CredentialData, error) {
 	var credentials []render.CredentialData
 
 	for _, sm := range schemas {
-		// Extract org and slug from the schema's SchemaURIs
 		org, slug := orgSlugFromID(sm, baseURL)
 
 		cred := render.CredentialData{
@@ -316,21 +331,70 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir string, schemas
 			TS11Compliant: ts11Compliant[sm.ID],
 		}
 
-		// Look for rulebook.md in the cloned repo
+		// Find the repo containing this credential
 		for _, repo := range repos {
 			repoOrg := extractOrg(repo.URL)
+			if repoOrg != org {
+				continue
+			}
 			repoDir := filepath.Join(workDir, repoOrg, extractRepoName(repo.URL))
-			rulebookPath := filepath.Join(repoDir, "rulebook.md")
-			if repoOrg == org {
-				if data, err := os.ReadFile(rulebookPath); err == nil {
-					html, err := render.RenderMarkdown(data)
-					if err == nil {
-						cred.HasRulebook = true
-						cred.RulebookHTML = html
-					}
+
+			// Verify this repo has the schema-meta file for this slug
+			found := false
+			for _, ext := range []string{".schema-meta.yaml", ".schema-meta.json"} {
+				if _, err := os.Stat(filepath.Join(repoDir, slug+ext)); err == nil {
+					found = true
 					break
 				}
 			}
+			if !found {
+				continue
+			}
+
+			// Source info
+			cred.SourceURL = repo.URL
+			cred.SourceOrg = repoOrg
+			cred.SourceRepo = extractRepoName(repo.URL)
+
+			// Read rulebook
+			rulebookPath := filepath.Join(repoDir, "rulebook.md")
+			if data, err := os.ReadFile(rulebookPath); err == nil {
+				html, renderErr := render.RenderMarkdown(data)
+				if renderErr == nil {
+					cred.HasRulebook = true
+					cred.RulebookHTML = html
+				}
+			}
+
+			// Read and parse VCTM JSON
+			vctmPath := filepath.Join(repoDir, slug+".vctm.json")
+			if data, err := os.ReadFile(vctmPath); err == nil {
+				cred.RawVCTMJSON = prettyFormatJSON(data)
+				var vctm render.VCTMData
+				if jsonErr := json.Unmarshal(data, &vctm); jsonErr == nil {
+					cred.VCTM = &vctm
+				}
+			}
+
+			// Read mDOC JSON
+			mdocPath := filepath.Join(repoDir, slug+".mdoc.json")
+			if data, err := os.ReadFile(mdocPath); err == nil {
+				cred.RawMdocJSON = prettyFormatJSON(data)
+				cred.HasMdoc = true
+			}
+
+			// Read W3C VC JSON
+			vcPath := filepath.Join(repoDir, slug+".vc.json")
+			if data, err := os.ReadFile(vcPath); err == nil {
+				cred.RawVCJSON = prettyFormatJSON(data)
+				cred.HasVC = true
+			}
+
+			// Build available formats and copy format files to output
+			cred.AvailableFormats = buildFormatInfo(org, slug, repoDir)
+			copyFormatFiles(repoDir, outputDir, org, slug)
+
+			break
 		}
 
 		credentials = append(credentials, cred)
@@ -369,4 +433,47 @@ func writeOpenAPISpec(outputDir string) error {
 		return err
 	}
 	return render.WriteOpenAPISpec(filepath.Join(apiDir, "openapi.yaml"))
+}
+
+func prettyFormatJSON(data []byte) string {
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, data, "", "  "); err != nil {
+		return string(data)
+	}
+	return buf.String()
+}
+
+func buildFormatInfo(org, slug, repoDir string) []render.FormatInfo {
+	type fmtDef struct {
+		ext, name, label string
+	}
+	defs := []fmtDef{
+		{".vctm.json", "SD-JWT", "SD-JWT VC Type Metadata"},
+		{".mdoc.json", "mDOC", "mso_mdoc Credential Configuration"},
+		{".vc.json", "W3C VC", "W3C VCDM 2.0 JSON Schema"},
+	}
+	var formats []render.FormatInfo
+	for _, d := range defs {
+		if _, err := os.Stat(filepath.Join(repoDir, slug+d.ext)); err == nil {
+			formats = append(formats, render.FormatInfo{
+				Name:  d.name,
+				Label: d.label,
+				File:  "/" + org + "/" + slug + d.ext,
+			})
+		}
+	}
+	return formats
+}
+
+func copyFormatFiles(repoDir, outputDir, org, slug string) {
+	for ext := range schemameta.FormatMapping {
+		srcPath := filepath.Join(repoDir, slug+ext)
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			continue
+		}
+		dstDir := filepath.Join(outputDir, org)
+		_ = os.MkdirAll(dstDir, 0o755)
+		_ = os.WriteFile(filepath.Join(dstDir, slug+ext), data, 0o644)
+	}
 }

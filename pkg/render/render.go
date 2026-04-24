@@ -28,6 +28,20 @@ type CredentialData struct {
 	TS11Compliant bool
 	HasRulebook   bool
 	RulebookHTML  template.HTML
+
+	// VCTM content
+	VCTM             *VCTMData
+	RawVCTMJSON      string
+	RawMdocJSON      string
+	RawVCJSON        string
+	HasMdoc          bool
+	HasVC            bool
+	AvailableFormats []FormatInfo
+
+	// Source info
+	SourceURL  string
+	SourceOrg  string
+	SourceRepo string
 }
 
 // SiteData holds the data for rendering the site index page.
@@ -35,6 +49,7 @@ type SiteData struct {
 	BaseURL     string
 	Credentials []CredentialData
 	BuildTime   string
+	Orgs        []OrgData
 }
 
 // Renderer renders HTML pages from Go templates.
@@ -84,6 +99,15 @@ func (r *Renderer) RenderCredential(outputDir string, data CredentialData) error
 	return r.renderToFile(filepath.Join(dir, "index.html"), "credential.html", data)
 }
 
+// RenderOrg renders an organization page.
+func (r *Renderer) RenderOrg(outputDir string, data OrgData) error {
+	dir := filepath.Join(outputDir, data.Name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return r.renderToFile(filepath.Join(dir, "index.html"), "org.html", data)
+}
+
 // RenderRulebook renders a rulebook markdown file to HTML.
 func (r *Renderer) RenderRulebook(outputDir string, data CredentialData) error {
 	if !data.HasRulebook {
@@ -130,6 +154,7 @@ func (r *Renderer) RenderExtraDocPages(outputDir string, data SiteData) error {
 		"":                true,
 		"index.html":      true,
 		"credential.html": true,
+		"org.html":        true,
 		"rulebook.html":   true,
 		"ts11.html":       true,
 		"api.html":        true,
@@ -201,6 +226,12 @@ func templateFuncs() template.FuncMap {
 				result += item
 			}
 			return result
+		},
+		"formatPath": func(path []string) string {
+			return strings.Join(path, ".")
+		},
+		"safeURL": func(u string) template.URL {
+			return template.URL(u)
 		},
 	}
 }

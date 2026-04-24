@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.Name}} — Credential Registry</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Credential Registry</h1>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/docs/ts11.html">TS11 Info</a>
+      <a href="/docs/api.html">API</a>
+    </nav>
+  </header>
+  <main>
+    <nav class="breadcrumb">
+      <a href="/">Home</a> /
+      <span>{{.Name}}</span>
+    </nav>
+    <h2>{{.Name}}</h2>
+    <p>{{len .Credentials}} credential{{if ne (len .Credentials) 1}}s{{end}} registered</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Credential</th>
+          <th>Formats</th>
+          <th>LoS</th>
+          <th>Binding</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Credentials}}
+        <tr>
+          <td><a href="/{{.Org}}/{{.Slug}}/">{{if .VCTM}}{{.VCTM.Name}}{{else}}{{.Slug}}{{end}}</a></td>
+          <td>{{join ", " .Schema.SupportedFormats}}</td>
+          <td>{{.Schema.AttestationLoS}}</td>
+          <td>{{.Schema.BindingType}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </main>
+  <footer>
+    <p><a href="/">← Back to registry</a></p>
+  </footer>
+</body>
+</html>
