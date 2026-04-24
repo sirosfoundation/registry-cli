@@ -104,6 +104,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing outputs: %w", writeErr)
 	}
 
+	// 5b. Write legacy API output (all schemas, including non-TS11)
+	if writeErr := writeLegacyOutput(flagOutput, schemas); writeErr != nil {
+		return fmt.Errorf("writing legacy output: %w", writeErr)
+	}
+
 	// 6. Render HTML site (all credentials, with TS11 compliance flag)
 	credentials, err := buildCredentialData(repos, workDir, flagOutput, schemas, flagBaseURL, ts11Compliant)
 	if err != nil {
@@ -209,6 +214,9 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL string, logger *s
 	}
 
 	var schemas []*schemameta.SchemaMeta
+	knownSlugs := make(map[string]bool)
+
+	// First pass: find schema-meta files (TS11 credentials)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -224,30 +232,54 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL string, logger *s
 			continue
 		}
 
-		src, err := schemameta.ParseSource(filepath.Join(repoDir, name))
-		if err != nil {
-			logger.Warn("skipping schema-meta", "file", name, "error", err)
+		src, parseErr := schemameta.ParseSource(filepath.Join(repoDir, name))
+		if parseErr != nil {
+			logger.Warn("skipping schema-meta", "file", name, "error", parseErr)
 			continue
 		}
 
-		formats, formatFiles, err := schemameta.DetectFormats(repoDir, slug)
-		if err != nil {
-			logger.Warn("detecting formats", "slug", slug, "error", err)
+		formats, formatFiles, fmtErr := schemameta.DetectFormats(repoDir, slug)
+		if fmtErr != nil {
+			logger.Warn("detecting formats", "slug", slug, "error", fmtErr)
 			continue
 		}
 
 		// Check for co-located rulebook.md
 		rulebookPath := filepath.Join(repoDir, "rulebook.md")
 		if src.RulebookURI == "" {
-			if _, err := os.Stat(rulebookPath); err == nil {
+			if _, statErr := os.Stat(rulebookPath); statErr == nil {
 				src.RulebookURI = fmt.Sprintf("%s/%s/%s/rulebook.html", baseURL, org, slug)
 			}
 		}
 
 		sm := schemameta.Infer(src, org, slug, baseURL, formats, formatFiles)
 		schemas = append(schemas, sm)
+		knownSlugs[slug] = true
 
 		logger.Info("processed credential",
+			"org", org, "slug", slug, "id", sm.ID,
+			"formats", sm.SupportedFormats)
+	}
+
+	// Second pass: discover legacy VCTM-only credentials (no schema-meta)
+	legacySlugs, err := schemameta.DetectLegacyCredentials(repoDir, knownSlugs)
+	if err != nil {
+		logger.Warn("detecting legacy credentials", "error", err)
+	}
+	for _, slug := range legacySlugs {
+		formats, formatFiles, err := schemameta.DetectFormats(repoDir, slug)
+		if err != nil {
+			logger.Warn("detecting formats for legacy credential", "slug", slug, "error", err)
+			continue
+		}
+		if len(formats) == 0 {
+			continue
+		}
+
+		sm := schemameta.InferLegacy(org, slug, baseURL, formats, formatFiles)
+		schemas = append(schemas, sm)
+
+		logger.Info("processed legacy credential",
 			"org", org, "slug", slug, "id", sm.ID,
 			"formats", sm.SupportedFormats)
 	}
@@ -291,6 +323,44 @@ func writeOutputs(outputDir, baseURL string, schemas []*schemameta.SchemaMeta) e
 	}
 
 	return nil
+}
+
+// writeLegacyOutput writes a legacy vctm-registry.json that includes ALL credentials
+// (both TS11-compliant and non-TS11), preserving backward compatibility.
+func writeLegacyOutput(outputDir string, schemas []*schemameta.SchemaMeta) error {
+	type legacyCredential struct {
+		ID               string   `json:"id"`
+		Version          string   `json:"version"`
+		SupportedFormats []string `json:"supportedFormats"`
+		AttestationLoS   string   `json:"attestationLoS,omitempty"`
+		BindingType      string   `json:"bindingType,omitempty"`
+	}
+
+	var creds []legacyCredential
+	for _, sm := range schemas {
+		creds = append(creds, legacyCredential{
+			ID:               sm.ID,
+			Version:          sm.Version,
+			SupportedFormats: sm.SupportedFormats,
+			AttestationLoS:   sm.AttestationLoS,
+			BindingType:      sm.BindingType,
+		})
+	}
+
+	payload := map[string]any{
+		"total":       len(creds),
+		"credentials": creds,
+	}
+
+	apiDir := filepath.Join(outputDir, "api", "v1")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling legacy registry: %w", err)
+	}
+	return os.WriteFile(filepath.Join(apiDir, "registry.json"), data, 0o644)
 }
 
 func extractOrg(cloneURL string) string {
@@ -339,9 +409,9 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			}
 			repoDir := filepath.Join(workDir, repoOrg, extractRepoName(repo.URL))
 
-			// Verify this repo has the schema-meta file for this slug
+			// Verify this repo has either a schema-meta file or a VCTM file for this slug
 			found := false
-			for _, ext := range []string{".schema-meta.yaml", ".schema-meta.json"} {
+			for _, ext := range []string{".schema-meta.yaml", ".schema-meta.json", ".vctm.json", ".vctm"} {
 				if _, err := os.Stat(filepath.Join(repoDir, slug+ext)); err == nil {
 					found = true
 					break
@@ -366,13 +436,23 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 				}
 			}
 
-			// Read and parse VCTM JSON
+			// Read and parse VCTM JSON (try .vctm.json first, then bare .vctm)
 			vctmPath := filepath.Join(repoDir, slug+".vctm.json")
 			if data, err := os.ReadFile(vctmPath); err == nil {
 				cred.RawVCTMJSON = prettyFormatJSON(data)
 				var vctm render.VCTMData
 				if jsonErr := json.Unmarshal(data, &vctm); jsonErr == nil {
 					cred.VCTM = &vctm
+				}
+			} else {
+				// Try bare .vctm extension (legacy repos like SUNET/vc)
+				bareVCTMPath := filepath.Join(repoDir, slug+".vctm")
+				if data, err := os.ReadFile(bareVCTMPath); err == nil {
+					cred.RawVCTMJSON = prettyFormatJSON(data)
+					var vctm render.VCTMData
+					if jsonErr := json.Unmarshal(data, &vctm); jsonErr == nil {
+						cred.VCTM = &vctm
+					}
 				}
 			}
 
@@ -422,6 +502,11 @@ func orgSlugFromID(sm *schemameta.SchemaMeta, baseURL string) (org, slug string)
 					return
 				}
 			}
+			// Also handle bare .vctm extension
+			if strings.HasSuffix(filename, ".vctm") {
+				slug = strings.TrimSuffix(filename, ".vctm")
+				return
+			}
 		}
 	}
 	return
@@ -462,10 +547,22 @@ func buildFormatInfo(org, slug, repoDir string) []render.FormatInfo {
 			})
 		}
 	}
+	// Also check for bare .vctm (legacy) if no .vctm.json was found
+	if len(formats) == 0 || formats[0].Name != "SD-JWT" {
+		if _, err := os.Stat(filepath.Join(repoDir, slug+".vctm")); err == nil {
+			// Prepend SD-JWT entry for bare .vctm
+			formats = append([]render.FormatInfo{{
+				Name:  "SD-JWT",
+				Label: "SD-JWT VC Type Metadata",
+				File:  "/" + org + "/" + slug + ".vctm",
+			}}, formats...)
+		}
+	}
 	return formats
 }
 
 func copyFormatFiles(repoDir, outputDir, org, slug string) {
+	// Copy files from FormatMapping
 	for ext := range schemameta.FormatMapping {
 		srcPath := filepath.Join(repoDir, slug+ext)
 		data, err := os.ReadFile(srcPath)
@@ -475,5 +572,12 @@ func copyFormatFiles(repoDir, outputDir, org, slug string) {
 		dstDir := filepath.Join(outputDir, org)
 		_ = os.MkdirAll(dstDir, 0o755)
 		_ = os.WriteFile(filepath.Join(dstDir, slug+ext), data, 0o644)
+	}
+	// Also copy bare .vctm files
+	bareVCTM := filepath.Join(repoDir, slug+".vctm")
+	if data, err := os.ReadFile(bareVCTM); err == nil {
+		dstDir := filepath.Join(outputDir, org)
+		_ = os.MkdirAll(dstDir, 0o755)
+		_ = os.WriteFile(filepath.Join(dstDir, slug+".vctm"), data, 0o644)
 	}
 }

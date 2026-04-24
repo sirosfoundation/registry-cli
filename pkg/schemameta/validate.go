@@ -32,6 +32,14 @@ func NewValidator() (*Validator, error) {
 
 // Validate checks a SchemaMeta object against the TS11 JSON schema.
 func (v *Validator) Validate(sm *SchemaMeta) error {
+	// Require non-empty governance fields beyond JSON schema structural validation
+	if sm.AttestationLoS == "" {
+		return fmt.Errorf("attestationLoS is required for TS11 compliance")
+	}
+	if sm.BindingType == "" {
+		return fmt.Errorf("bindingType is required for TS11 compliance")
+	}
+
 	data, err := json.Marshal(sm)
 	if err != nil {
 		return fmt.Errorf("marshaling schema for validation: %w", err)
