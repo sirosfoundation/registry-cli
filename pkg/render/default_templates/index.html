@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>Credential Registry</h1>
-    <p>TS11-compliant Catalogue of Attestations</p>
+    <p>Catalogue of Attestations</p>
     <nav>
       <a href="/">Home</a>
       <a href="/docs/ts11.html">TS11 Info</a>
@@ -27,6 +27,7 @@
           <th>Formats</th>
           <th>LoS</th>
           <th>Binding</th>
+          <th>Status</th>
         </tr>
       </thead>
       <tbody>
@@ -37,6 +38,7 @@
           <td>{{join ", " .Schema.SupportedFormats}}</td>
           <td>{{.Schema.AttestationLoS}}</td>
           <td>{{.Schema.BindingType}}</td>
+          <td>{{if .TS11Compliant}}<span class="badge badge-ts11" title="TS11 Compliant">TS11</span>{{end}}</td>
         </tr>
         {{end}}
       </tbody>

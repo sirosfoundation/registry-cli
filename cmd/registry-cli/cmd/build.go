@@ -80,25 +80,31 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 	logger.Info("discovered schemas", "count", len(schemas))
 
-	// 4. Validate schemas against TS11 JSON schema
+	// 4. Validate schemas against TS11 JSON schema and track compliance
+	ts11Compliant := make(map[string]bool)
+	var ts11Schemas []*schemameta.SchemaMeta
 	validator, err := schemameta.NewValidator()
 	if err != nil {
 		logger.Warn("could not load TS11 schema validator", "error", err)
 	} else {
 		for _, sm := range schemas {
 			if valErr := validator.Validate(sm); valErr != nil {
-				logger.Warn("schema validation warning", "id", sm.ID, "error", valErr)
+				logger.Info("credential is not TS11-compliant", "id", sm.ID, "reason", valErr)
+			} else {
+				ts11Compliant[sm.ID] = true
+				ts11Schemas = append(ts11Schemas, sm)
 			}
 		}
 	}
+	logger.Info("TS11 compliance", "total", len(schemas), "compliant", len(ts11Schemas))
 
-	// 5. Write API outputs (unsigned JSON)
-	if writeErr := writeOutputs(flagOutput, flagBaseURL, schemas); writeErr != nil {
+	// 5. Write API outputs (only TS11-compliant schemas)
+	if writeErr := writeOutputs(flagOutput, flagBaseURL, ts11Schemas); writeErr != nil {
 		return fmt.Errorf("writing outputs: %w", writeErr)
 	}
 
-	// 6. Render HTML site
-	credentials, err := buildCredentialData(repos, workDir, schemas, flagBaseURL)
+	// 6. Render HTML site (all credentials, with TS11 compliance flag)
+	credentials, err := buildCredentialData(repos, workDir, schemas, flagBaseURL, ts11Compliant)
 	if err != nil {
 		return fmt.Errorf("building credential data: %w", err)
 	}
@@ -292,7 +298,7 @@ func cloneRepo(url, branch, dest string) error {
 
 // buildCredentialData constructs render.CredentialData for each schema,
 // including rulebook rendering if a rulebook.md is present.
-func buildCredentialData(repos []discovery.ResolvedRepo, workDir string, schemas []*schemameta.SchemaMeta, baseURL string) ([]render.CredentialData, error) {
+func buildCredentialData(repos []discovery.ResolvedRepo, workDir string, schemas []*schemameta.SchemaMeta, baseURL string, ts11Compliant map[string]bool) ([]render.CredentialData, error) {
 	// Build a map of org → schema for lookup
 	var credentials []render.CredentialData
 
@@ -301,9 +307,10 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir string, schemas
 		org, slug := orgSlugFromID(sm, baseURL)
 
 		cred := render.CredentialData{
-			Org:    org,
-			Slug:   slug,
-			Schema: sm,
+			Org:           org,
+			Slug:          slug,
+			Schema:        sm,
+			TS11Compliant: ts11Compliant[sm.ID],
 		}
 
 		// Look for rulebook.md in the cloned repo

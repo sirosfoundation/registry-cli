@@ -21,11 +21,12 @@ var defaultTemplates embed.FS
 
 // CredentialData holds the data for rendering a credential detail page.
 type CredentialData struct {
-	Org          string
-	Slug         string
-	Schema       *schemameta.SchemaMeta
-	HasRulebook  bool
-	RulebookHTML template.HTML
+	Org           string
+	Slug          string
+	Schema        *schemameta.SchemaMeta
+	TS11Compliant bool
+	HasRulebook   bool
+	RulebookHTML  template.HTML
 }
 
 // SiteData holds the data for rendering the site index page.
