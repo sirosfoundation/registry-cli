@@ -50,6 +50,7 @@ type SiteData struct {
 	Credentials []CredentialData
 	BuildTime   string
 	Orgs        []OrgData
+	TS11Count   int
 }
 
 // Renderer renders HTML pages from Go templates.

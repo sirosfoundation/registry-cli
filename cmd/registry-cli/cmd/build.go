@@ -134,7 +134,9 @@ func runBuild(cmd *cobra.Command, args []string) error {
 				break
 			}
 		}
-		orgs = append(orgs, render.OrgData{Name: orgName, Credentials: orgCreds, HasTS11: hasTS11})
+		// Construct GitHub avatar URL from org name
+		avatarURL := "https://github.com/" + orgName + ".png?size=80"
+		orgs = append(orgs, render.OrgData{Name: orgName, Credentials: orgCreds, HasTS11: hasTS11, AvatarURL: avatarURL})
 	}
 
 	siteData := render.SiteData{
