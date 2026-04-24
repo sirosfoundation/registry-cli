@@ -1,0 +1,33 @@
+# Build output
+/registry-cli
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test output
+coverage.out
+coverage.html
+
+# Build directories
+dist/
+dist-*/

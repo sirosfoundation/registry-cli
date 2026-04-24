@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Credential Registry</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Credential Registry</h1>
+    <p>TS11-compliant Catalogue of Attestations</p>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/docs/ts11.html">TS11 Info</a>
+      <a href="/docs/api.html">API</a>
+      <a href="/api/v1/openapi.yaml">OpenAPI</a>
+    </nav>
+  </header>
+  <main>
+    <h2>Registered Credentials</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Organisation</th>
+          <th>Credential</th>
+          <th>Formats</th>
+          <th>LoS</th>
+          <th>Binding</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Credentials}}
+        <tr>
+          <td>{{.Org}}</td>
+          <td><a href="/{{.Org}}/{{.Slug}}/">{{.Slug}}</a></td>
+          <td>{{join ", " .Schema.SupportedFormats}}</td>
+          <td>{{.Schema.AttestationLoS}}</td>
+          <td>{{.Schema.BindingType}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    <p>Total: {{len .Credentials}} credential(s). Built: {{.BuildTime}}</p>
+  </main>
+  <footer>
+    <p>API: <a href="/api/v1/schemas.jwt">GET /schemas</a> |
+       JWKS: <a href="/api/v1/.well-known/jwks.json">jwks.json</a></p>
+  </footer>
+</body>
+</html>

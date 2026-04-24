@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Reference — Credential Registry</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Credential Registry</h1>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/docs/ts11.html">TS11 Info</a>
+      <a href="/docs/api.html">API</a>
+    </nav>
+  </header>
+  <main>
+    <h2>API Reference</h2>
+
+    <h3>Base URL</h3>
+    <p><code>{{.BaseURL}}/api/v1</code></p>
+
+    <h3>GET /schemas</h3>
+    <p>Returns a JWS compact serialization containing all registered attestation schemas.</p>
+    <pre>curl {{.BaseURL}}/api/v1/schemas.jwt</pre>
+    <p>The payload contains a <code>data</code> array of <code>SchemaMeta</code> objects.</p>
+
+    <h3>GET /schemas/{schemaId}</h3>
+    <p>Returns a JWS compact serialization containing a single <code>SchemaMeta</code> object.</p>
+    <pre>curl {{.BaseURL}}/api/v1/schemas/{uuid}.jwt</pre>
+
+    <h3>Signature Verification</h3>
+    <p>Public keys are published as a JWKS at
+    <a href="{{.BaseURL}}/api/v1/.well-known/jwks.json"><code>{{.BaseURL}}/api/v1/.well-known/jwks.json</code></a>.</p>
+
+    <h3>OpenAPI Specification</h3>
+    <p><a href="{{.BaseURL}}/api/v1/openapi.yaml">Download OpenAPI 3.1 specification</a></p>
+  </main>
+</body>
+</html>

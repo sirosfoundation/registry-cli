@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Attestation Rulebook — {{.Slug}}</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Credential Registry</h1>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/{{.Org}}/{{.Slug}}/">{{.Slug}}</a>
+    </nav>
+  </header>
+  <main>
+    <h2>Attestation Rulebook: {{.Slug}}</h2>
+    <p>Organisation: <strong>{{.Org}}</strong></p>
+    <article class="rulebook">
+      {{.Content}}
+    </article>
+  </main>
+  <footer>
+    <p><a href="/{{.Org}}/{{.Slug}}/">← Back to credential</a></p>
+  </footer>
+</body>
+</html>

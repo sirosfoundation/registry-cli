@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TS11 Compliance — Credential Registry</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Credential Registry</h1>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/docs/ts11.html">TS11 Info</a>
+      <a href="/docs/api.html">API</a>
+    </nav>
+  </header>
+  <main>
+    <h2>TS11 Compliance Information</h2>
+    <p>This registry implements a read-only subset of the
+    <a href="https://github.com/eu-digital-identity-wallet/eudi-doc-standards-and-technical-specifications/blob/main/docs/technical-specifications/ts11-interfaces-and-formats-for-catalogue-of-attributes-and-catalogue-of-schemes.md">
+    ETSI TS11</a> Catalogue of Attestations specification.</p>
+
+    <h3>Implemented Endpoints</h3>
+    <table>
+      <tr><td><code>GET /schemas</code></td><td>List all attestation schemas (JWS-signed)</td></tr>
+      <tr><td><code>GET /schemas/{schemaId}</code></td><td>Get a single schema by ID (JWS-signed)</td></tr>
+    </table>
+
+    <h3>Response Format</h3>
+    <p>All API responses are JWS compact serialization (RFC 7515) containing a JWT payload
+    with <code>iss</code> and <code>iat</code> claims. The signing key is published at
+    <a href="/api/v1/.well-known/jwks.json"><code>/.well-known/jwks.json</code></a>.</p>
+
+    <h3>Governance Model</h3>
+    <p>This catalogue is managed via a git-based workflow. Changes to credential schemas
+    are submitted as pull requests to source repositories and reviewed before publication.
+    Write API endpoints (PUT, DELETE) are intentionally omitted.</p>
+
+    <h3>Statistics</h3>
+    <p>{{len .Credentials}} registered credential(s). Last built: {{.BuildTime}}.</p>
+  </main>
+</body>
+</html>

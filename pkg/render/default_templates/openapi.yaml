@@ -1,0 +1,134 @@
+openapi: '3.1.0'
+info:
+  title: TS11 Catalogue of Attestations API
+  description: |
+    Read-only TS11-compliant API for the Catalogue of Attestations.
+    All responses are JWS compact serialization (RFC 7515).
+    Write operations are handled via git-based workflow.
+  version: '1.0.0'
+  contact:
+    name: SIROS Foundation
+    url: https://siros.org
+servers:
+  - url: '{baseUrl}/api/v1'
+    variables:
+      baseUrl:
+        default: https://registry.siros.org
+paths:
+  /schemas.jwt:
+    get:
+      operationId: listSchemas
+      summary: List all attestation schemas
+      description: Returns a JWS compact serialization containing all SchemaMeta objects.
+      responses:
+        '200':
+          description: JWS-signed list of all attestation schemas
+          content:
+            application/jose:
+              schema:
+                type: string
+                description: JWS compact serialization
+  /schemas/{schemaId}.jwt:
+    get:
+      operationId: getSchema
+      summary: Get a single attestation schema
+      description: Returns a JWS compact serialization containing a single SchemaMeta object.
+      parameters:
+        - name: schemaId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: JWS-signed SchemaMeta object
+          content:
+            application/jose:
+              schema:
+                type: string
+                description: JWS compact serialization
+        '404':
+          description: Schema not found
+  /.well-known/jwks.json:
+    get:
+      operationId: getJWKS
+      summary: Get the JSON Web Key Set
+      description: Returns the JWKS containing the public key(s) for verifying JWS signatures.
+      responses:
+        '200':
+          description: JWKS
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+components:
+  schemas:
+    SchemaMeta:
+      type: object
+      required:
+        - id
+        - version
+        - attestationLoS
+        - bindingType
+        - supportedFormats
+        - schemaURIs
+      properties:
+        id:
+          type: string
+          format: uuid
+        version:
+          type: string
+        attestationLoS:
+          type: string
+        bindingType:
+          type: string
+        supportedFormats:
+          type: array
+          items:
+            type: string
+        schemaURIs:
+          type: array
+          items:
+            $ref: '#/components/schemas/SchemaURI'
+        rulebookURI:
+          type: string
+          format: uri
+        trustedAuthorities:
+          type: array
+    SchemaURI:
+      type: object
+      required:
+        - formatIdentifier
+        - uri
+      properties:
+        formatIdentifier:
+          type: string
+        uri:
+          type: string
+          format: uri
+    SignedSchemaListPayload:
+      type: object
+      properties:
+        iss:
+          type: string
+        iat:
+          type: integer
+        data:
+          type: object
+          properties:
+            total:
+              type: integer
+            limit:
+              type: integer
+            offset:
+              type: integer
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/SchemaMeta'
