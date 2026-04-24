@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/yuin/goldmark"
 
@@ -119,6 +120,34 @@ func (r *Renderer) RenderAPIDocs(outputDir string, data SiteData) error {
 		return err
 	}
 	return r.renderToFile(filepath.Join(docsDir, "api.html"), "api.html", data)
+}
+
+// RenderExtraDocPages renders any additional HTML templates loaded from
+// the override directory that aren't part of the built-in set.
+// They are rendered to docs/{name} in the output directory.
+func (r *Renderer) RenderExtraDocPages(outputDir string, data SiteData) error {
+	builtIn := map[string]bool{
+		"":                true,
+		"index.html":      true,
+		"credential.html": true,
+		"rulebook.html":   true,
+		"ts11.html":       true,
+		"api.html":        true,
+	}
+	docsDir := filepath.Join(outputDir, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		return err
+	}
+	for _, t := range r.tmpl.Templates() {
+		name := t.Name()
+		if builtIn[name] || !strings.HasSuffix(name, ".html") {
+			continue
+		}
+		if err := r.renderToFile(filepath.Join(docsDir, name), name, data); err != nil {
+			return fmt.Errorf("rendering doc page %s: %w", name, err)
+		}
+	}
+	return nil
 }
 
 func (r *Renderer) renderToFile(path, templateName string, data any) error {

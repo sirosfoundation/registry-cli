@@ -137,6 +137,9 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if err := renderer.RenderAPIDocs(flagOutput, siteData); err != nil {
 		return fmt.Errorf("rendering API docs: %w", err)
 	}
+	if err := renderer.RenderExtraDocPages(flagOutput, siteData); err != nil {
+		return fmt.Errorf("rendering extra doc pages: %w", err)
+	}
 
 	// 7. Copy OpenAPI spec
 	if err := writeOpenAPISpec(flagOutput); err != nil {
