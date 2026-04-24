@@ -7,8 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sirosfoundation/registry-cli/pkg/jwssign"
 	"github.com/spf13/cobra"
+
+	"github.com/sirosfoundation/registry-cli/pkg/jwssign"
 )
 
 var signCmd = &cobra.Command{

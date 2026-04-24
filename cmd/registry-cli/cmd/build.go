@@ -9,10 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/sirosfoundation/registry-cli/pkg/discovery"
 	"github.com/sirosfoundation/registry-cli/pkg/render"
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
-	"github.com/spf13/cobra"
 )
 
 var buildCmd = &cobra.Command{
@@ -66,13 +67,13 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("creating work directory: %w", err)
 	}
-	defer os.RemoveAll(workDir)
+	defer func() { _ = os.RemoveAll(workDir) }()
 
 	var schemas []*schemameta.SchemaMeta
 	for _, repo := range repos {
-		repoSchemas, err := processRepo(repo, workDir, flagBaseURL, logger)
-		if err != nil {
-			logger.Warn("skipping repo", "url", repo.URL, "error", err)
+		repoSchemas, processErr := processRepo(repo, workDir, flagBaseURL, logger)
+		if processErr != nil {
+			logger.Warn("skipping repo", "url", repo.URL, "error", processErr)
 			continue
 		}
 		schemas = append(schemas, repoSchemas...)
@@ -85,15 +86,15 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		logger.Warn("could not load TS11 schema validator", "error", err)
 	} else {
 		for _, sm := range schemas {
-			if err := validator.Validate(sm); err != nil {
-				logger.Warn("schema validation warning", "id", sm.ID, "error", err)
+			if valErr := validator.Validate(sm); valErr != nil {
+				logger.Warn("schema validation warning", "id", sm.ID, "error", valErr)
 			}
 		}
 	}
 
 	// 5. Write API outputs (unsigned JSON)
-	if err := writeOutputs(flagOutput, flagBaseURL, schemas); err != nil {
-		return fmt.Errorf("writing outputs: %w", err)
+	if writeErr := writeOutputs(flagOutput, flagBaseURL, schemas); writeErr != nil {
+		return fmt.Errorf("writing outputs: %w", writeErr)
 	}
 
 	// 6. Render HTML site
@@ -287,27 +288,6 @@ func extractRepoName(cloneURL string) string {
 
 func cloneRepo(url, branch, dest string) error {
 	return execGit("clone", "--depth", "1", "--branch", branch, url, dest)
-}
-
-func copyDir(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-		dstPath := filepath.Join(dst, relPath)
-		if info.IsDir() {
-			return os.MkdirAll(dstPath, 0o755)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dstPath, data, info.Mode())
-	})
 }
 
 // buildCredentialData constructs render.CredentialData for each schema,

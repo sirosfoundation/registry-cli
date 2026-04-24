@@ -16,11 +16,11 @@ var UUIDNamespace = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8") // DN
 
 // SchemaMetaSource represents the manually-authored fields from schema-meta.yaml.
 type SchemaMetaSource struct {
-	AttestationLoS    string   `yaml:"attestation_los" json:"attestationLoS"`
-	BindingType       string   `yaml:"binding_type" json:"bindingType"`
-	Version           string   `yaml:"version,omitempty" json:"version,omitempty"`
-	TrustedAuthorities []any   `yaml:"trusted_authorities,omitempty" json:"trustedAuthorities,omitempty"`
-	RulebookURI       string   `yaml:"rulebook_uri,omitempty" json:"rulebookURI,omitempty"`
+	AttestationLoS     string `yaml:"attestation_los" json:"attestationLoS"`
+	BindingType        string `yaml:"binding_type" json:"bindingType"`
+	Version            string `yaml:"version,omitempty" json:"version,omitempty"`
+	TrustedAuthorities []any  `yaml:"trusted_authorities,omitempty" json:"trustedAuthorities,omitempty"`
+	RulebookURI        string `yaml:"rulebook_uri,omitempty" json:"rulebookURI,omitempty"`
 }
 
 // SchemaURI represents a format-specific schema reference.
@@ -31,14 +31,14 @@ type SchemaURI struct {
 
 // SchemaMeta is the full TS11 SchemaMeta object, combining authored and inferred fields.
 type SchemaMeta struct {
-	ID                 string     `json:"id"`
-	Version            string     `json:"version"`
-	AttestationLoS     string     `json:"attestationLoS"`
-	BindingType        string     `json:"bindingType"`
-	SupportedFormats   []string   `json:"supportedFormats"`
+	ID                 string      `json:"id"`
+	Version            string      `json:"version"`
+	AttestationLoS     string      `json:"attestationLoS"`
+	BindingType        string      `json:"bindingType"`
+	SupportedFormats   []string    `json:"supportedFormats"`
 	SchemaURIs         []SchemaURI `json:"schemaURIs"`
-	RulebookURI        string     `json:"rulebookURI,omitempty"`
-	TrustedAuthorities []any      `json:"trustedAuthorities,omitempty"`
+	RulebookURI        string      `json:"rulebookURI,omitempty"`
+	TrustedAuthorities []any       `json:"trustedAuthorities,omitempty"`
 }
 
 // FormatMapping maps file extensions to TS11 format identifiers.
@@ -97,10 +97,10 @@ func DetectFormats(dir, slug string) (formats []string, files map[string]string,
 // Infer builds a complete SchemaMeta from authored source fields, detected formats, and context.
 func Infer(src *SchemaMetaSource, org, slug, baseURL string, formats []string, formatFiles map[string]string) *SchemaMeta {
 	sm := &SchemaMeta{
-		ID:               GenerateID(org, slug),
-		AttestationLoS:   src.AttestationLoS,
-		BindingType:      src.BindingType,
-		SupportedFormats: formats,
+		ID:                 GenerateID(org, slug),
+		AttestationLoS:     src.AttestationLoS,
+		BindingType:        src.BindingType,
+		SupportedFormats:   formats,
 		TrustedAuthorities: src.TrustedAuthorities,
 	}
 

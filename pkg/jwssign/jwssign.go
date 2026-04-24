@@ -21,12 +21,12 @@ import (
 
 // Signer signs JSON payloads as JWS compact serialization.
 type Signer struct {
-	ctx      *crypto11.Context
-	key      crypto11.Signer
-	alg      jose.SignatureAlgorithm
-	issuer   string
-	jku      string
-	keyID    string
+	ctx    *crypto11.Context
+	key    crypto11.Signer
+	alg    jose.SignatureAlgorithm
+	issuer string
+	jku    string
+	keyID  string
 }
 
 // Config holds the configuration for creating a Signer.
@@ -76,14 +76,13 @@ func ParsePKCS11URI(uri string) (module, token, pin string, err error) {
 
 // NewSigner creates a new JWS signer backed by a PKCS#11 key.
 func NewSigner(cfg Config) (*Signer, error) {
-	module, token, pin, err := ParsePKCS11URI(
-		fmt.Sprintf("pkcs11:module=%s;token=%s;pin=%s", cfg.PKCS11Module, cfg.TokenLabel, cfg.PIN),
-	)
+	var module, token, pin string
 	if cfg.PKCS11Module == "" {
 		// Try parsing from a full URI
-		module, token, pin, err = ParsePKCS11URI(cfg.PKCS11Module)
-		if err != nil {
-			return nil, err
+		var parseErr error
+		module, token, pin, parseErr = ParsePKCS11URI(cfg.PKCS11Module)
+		if parseErr != nil {
+			return nil, parseErr
 		}
 	} else {
 		module = cfg.PKCS11Module
@@ -116,11 +115,7 @@ func NewSigner(cfg Config) (*Signer, error) {
 		return nil, fmt.Errorf("key pair %q not found", cfg.KeyLabel)
 	}
 
-	signer, ok := kp.(crypto11.Signer)
-	if !ok {
-		ctx.Close()
-		return nil, fmt.Errorf("key pair does not implement crypto11.Signer")
-	}
+	signer := kp
 
 	alg, err := algorithmForKey(signer.Public())
 	if err != nil {
@@ -168,7 +163,7 @@ func (s *Signer) Sign(payload json.RawMessage) (string, error) {
 	envelope := map[string]any{
 		"iss":  s.issuer,
 		"iat":  time.Now().Unix(),
-		"data": json.RawMessage(payload),
+		"data": payload,
 	}
 	data, err := json.Marshal(envelope)
 	if err != nil {
@@ -258,11 +253,11 @@ func (s *Signer) SignAggregate(dir, pattern, outputPath string) error {
 
 	var items []json.RawMessage
 	for _, path := range matches {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return fmt.Errorf("reading %s: %w", path, err)
+		fileData, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return fmt.Errorf("reading %s: %w", path, readErr)
 		}
-		items = append(items, json.RawMessage(data))
+		items = append(items, json.RawMessage(fileData))
 	}
 
 	listPayload := map[string]any{

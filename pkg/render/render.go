@@ -11,8 +11,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
 	"github.com/yuin/goldmark"
+
+	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
 )
 
 //go:embed default_templates/*.html default_templates/*.yaml

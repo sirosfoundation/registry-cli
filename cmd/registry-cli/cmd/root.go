@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -31,7 +30,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Fprintf(os.Stdout, "registry-cli %s (commit: %s, built: %s)\n", Version, Commit, BuildTime)
+		fmt.Printf("registry-cli %s (commit: %s, built: %s)\n", Version, Commit, BuildTime)
 	},
 }
 

@@ -1,4 +1,5 @@
 package discovery
+
 import (
 	"fmt"
 	"os"
@@ -9,8 +10,8 @@ import (
 
 // SourceManifest is the top-level structure of a sources.yaml file.
 type SourceManifest struct {
-	Sources  []string        `yaml:"sources"`
-	Defaults SourceDefaults  `yaml:"defaults"`
+	Sources  []string       `yaml:"sources"`
+	Defaults SourceDefaults `yaml:"defaults"`
 }
 
 // SourceDefaults contains default settings applied to all resolved repos.
