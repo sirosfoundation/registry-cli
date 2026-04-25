@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
 )
@@ -186,8 +187,11 @@ func (r *Renderer) renderToFile(path, templateName string, data any) error {
 
 // RenderMarkdown converts markdown content to HTML.
 func RenderMarkdown(markdown []byte) (template.HTML, error) {
+	md := goldmark.New(
+		goldmark.WithExtensions(extension.Table),
+	)
 	var buf bytes.Buffer
-	if err := goldmark.Convert(markdown, &buf); err != nil {
+	if err := md.Convert(markdown, &buf); err != nil {
 		return "", fmt.Errorf("rendering markdown: %w", err)
 	}
 	return template.HTML(buf.String()), nil
