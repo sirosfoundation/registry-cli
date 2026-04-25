@@ -578,10 +578,10 @@ func writeDCATCatalog(outputDir, baseURL string, schemas []*schemameta.SchemaMet
 		Title     string `json:"dcterms:title"`
 	}
 	type dataset struct {
-		Type        string         `json:"@type"`
-		Identifier  string         `json:"dcterms:identifier"`
-		Title       string         `json:"dcterms:title"`
-		Description string         `json:"dcterms:description,omitempty"`
+		Type         string         `json:"@type"`
+		Identifier   string         `json:"dcterms:identifier"`
+		Title        string         `json:"dcterms:title"`
+		Description  string         `json:"dcterms:description,omitempty"`
 		Distribution []distribution `json:"dcat:distribution,omitempty"`
 	}
 	type catalog struct {
@@ -598,9 +598,9 @@ func writeDCATCatalog(outputDir, baseURL string, schemas []*schemameta.SchemaMet
 	var datasets []dataset
 	for _, sm := range schemas {
 		ds := dataset{
-			Type:       "dcat:Dataset",
-			Identifier: sm.ID,
-			Title:      sm.ID,
+			Type:        "dcat:Dataset",
+			Identifier:  sm.ID,
+			Title:       sm.ID,
 			Description: "Attestation schema (formats: " + strings.Join(sm.SupportedFormats, ", ") + ")",
 			Distribution: []distribution{
 				{
