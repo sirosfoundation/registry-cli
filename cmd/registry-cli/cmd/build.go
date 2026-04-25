@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sirosfoundation/registry-cli/pkg/discovery"
+	"github.com/sirosfoundation/registry-cli/pkg/mdcred"
 	"github.com/sirosfoundation/registry-cli/pkg/render"
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
 )
@@ -215,10 +216,31 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL string, logger *s
 		return nil, fmt.Errorf("cannot determine org from URL %q", repo.URL)
 	}
 
-	// Clone repo
-	repoDir := filepath.Join(workDir, org, extractRepoName(repo.URL))
-	if err := cloneRepo(repo.URL, repo.Branch, repoDir); err != nil {
-		return nil, fmt.Errorf("cloning %s: %w", repo.URL, err)
+	var repoDir string
+	if repo.Origin == "local" {
+		// Local directory: use file:// URL path directly, no git clone
+		localPath := strings.TrimPrefix(repo.URL, "file://")
+		absPath, err := filepath.Abs(localPath)
+		if err != nil {
+			return nil, fmt.Errorf("resolving local path %q: %w", localPath, err)
+		}
+		repoDir = absPath
+		logger.Info("using local directory", "path", repoDir)
+	} else {
+		// Clone repo
+		repoDir = filepath.Join(workDir, org, extractRepoName(repo.URL))
+		if err := cloneRepo(repo.URL, repo.Branch, repoDir); err != nil {
+			return nil, fmt.Errorf("cloning %s: %w", repo.URL, err)
+		}
+	}
+
+	// Pass 0: convert markdown credential files to VCTM format files
+	converted, err := mdcred.ConvertDir(repoDir, baseURL)
+	if err != nil {
+		logger.Warn("markdown credential conversion", "error", err)
+	}
+	for _, c := range converted {
+		logger.Info("converted markdown credential", "slug", c.Slug, "formats", len(c.Files))
 	}
 
 	// Find schema-meta files
@@ -378,8 +400,10 @@ func writeLegacyOutput(outputDir string, schemas []*schemameta.SchemaMeta) error
 }
 
 func extractOrg(cloneURL string) string {
-	// https://github.com/sirosfoundation/demo-credentials.git → sirosfoundation
+	// Strip URL schemes: file:///path → /path, https://... → ...
+	cloneURL = strings.TrimPrefix(cloneURL, "file://")
 	cloneURL = strings.TrimSuffix(cloneURL, ".git")
+	cloneURL = strings.TrimRight(cloneURL, "/")
 	parts := strings.Split(cloneURL, "/")
 	if len(parts) >= 2 {
 		return parts[len(parts)-2]
@@ -388,7 +412,9 @@ func extractOrg(cloneURL string) string {
 }
 
 func extractRepoName(cloneURL string) string {
+	cloneURL = strings.TrimPrefix(cloneURL, "file://")
 	cloneURL = strings.TrimSuffix(cloneURL, ".git")
+	cloneURL = strings.TrimRight(cloneURL, "/")
 	parts := strings.Split(cloneURL, "/")
 	if len(parts) >= 1 {
 		return parts[len(parts)-1]
@@ -421,7 +447,14 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			if repoOrg != org {
 				continue
 			}
-			repoDir := filepath.Join(workDir, repoOrg, extractRepoName(repo.URL))
+			var repoDir string
+			if repo.Origin == "local" {
+				localPath := strings.TrimPrefix(repo.URL, "file://")
+				absPath, _ := filepath.Abs(localPath)
+				repoDir = absPath
+			} else {
+				repoDir = filepath.Join(workDir, repoOrg, extractRepoName(repo.URL))
+			}
 
 			// Verify this repo has either a schema-meta file or a VCTM file for this slug
 			found := false
@@ -491,6 +524,9 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			break
 		}
 
+		if cred.SourceURL == "" {
+			slog.Default().Warn("credential not matched to any repo", "org", org, "slug", slug, "id", sm.ID)
+		}
 		credentials = append(credentials, cred)
 	}
 

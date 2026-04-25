@@ -72,6 +72,15 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 			continue
 		}
 
+		if strings.HasPrefix(source, "file://") {
+			explicit[source] = ResolvedRepo{
+				URL:    source,
+				Branch: "",
+				Origin: "local",
+			}
+			continue
+		}
+
 		resolved := false
 		for _, r := range resolvers {
 			if r.Handles(source) {

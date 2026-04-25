@@ -22,6 +22,7 @@ require (
 	github.com/miekg/pkcs11 v1.1.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/sirosfoundation/mtcvctm v1.8.0 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/thales-e-security/pool v0.0.2 // indirect
 )

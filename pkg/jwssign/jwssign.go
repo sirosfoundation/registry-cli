@@ -76,19 +76,12 @@ func ParsePKCS11URI(uri string) (module, token, pin string, err error) {
 
 // NewSigner creates a new JWS signer backed by a PKCS#11 key.
 func NewSigner(cfg Config) (*Signer, error) {
-	var module, token, pin string
 	if cfg.PKCS11Module == "" {
-		// Try parsing from a full URI
-		var parseErr error
-		module, token, pin, parseErr = ParsePKCS11URI(cfg.PKCS11Module)
-		if parseErr != nil {
-			return nil, parseErr
-		}
-	} else {
-		module = cfg.PKCS11Module
-		token = cfg.TokenLabel
-		pin = cfg.PIN
+		return nil, fmt.Errorf("PKCS11Module is required")
 	}
+	module := cfg.PKCS11Module
+	token := cfg.TokenLabel
+	pin := cfg.PIN
 
 	ctx, err := crypto11.Configure(&crypto11.Config{
 		Path:       module,

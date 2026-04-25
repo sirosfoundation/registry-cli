@@ -152,3 +152,45 @@ func TestResolveAll_UnknownScheme(t *testing.T) {
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no resolver")
 }
+
+func TestResolveAll_FileURL(t *testing.T) {
+	m := &SourceManifest{
+		Sources:  []string{"file:///home/user/credentials"},
+		Defaults: SourceDefaults{Branch: "vctm"},
+	}
+
+	repos, err := ResolveAll(m, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(repos))
+	assert.Equal(t, "file:///home/user/credentials", repos[0].URL)
+	assert.Equal(t, "local", repos[0].Origin)
+	assert.Equal(t, "", repos[0].Branch)
+}
+
+func TestResolveAll_FileURLAndGit(t *testing.T) {
+	m := &SourceManifest{
+		Sources: []string{
+			"file:///home/user/credentials",
+			"git:https://github.com/org/repo.git",
+		},
+		Defaults: SourceDefaults{Branch: "main"},
+	}
+
+	repos, err := ResolveAll(m, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 2, len(repos))
+
+	var local, remote *ResolvedRepo
+	for i := range repos {
+		if repos[i].Origin == "local" {
+			local = &repos[i]
+		} else {
+			remote = &repos[i]
+		}
+	}
+	require.NotNil(t, local)
+	require.NotNil(t, remote)
+	assert.Equal(t, "file:///home/user/credentials", local.URL)
+	assert.Equal(t, "https://github.com/org/repo.git", remote.URL)
+	assert.Equal(t, "main", remote.Branch)
+}
