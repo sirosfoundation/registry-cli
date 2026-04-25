@@ -140,11 +140,19 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		orgs = append(orgs, render.OrgData{Name: orgName, Credentials: orgCreds, HasTS11: hasTS11, AvatarURL: avatarURL})
 	}
 
+	ts11Count := 0
+	for _, c := range credentials {
+		if c.TS11Compliant {
+			ts11Count++
+		}
+	}
+
 	siteData := render.SiteData{
 		BaseURL:     flagBaseURL,
 		Credentials: credentials,
 		BuildTime:   time.Now().UTC().Format(time.RFC3339),
 		Orgs:        orgs,
+		TS11Count:   ts11Count,
 	}
 
 	if err := renderer.RenderIndex(flagOutput, siteData); err != nil {
