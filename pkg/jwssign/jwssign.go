@@ -8,6 +8,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -71,6 +72,11 @@ func ParsePKCS11URI(uri string) (module, token, pin string, err error) {
 	if token == "" {
 		return "", "", "", fmt.Errorf("pkcs11 URI missing token")
 	}
+	// Fall back to PKCS11_PIN environment variable if pin not in URI.
+	// This avoids embedding the PIN in configuration files.
+	if pin == "" {
+		pin = os.Getenv("PKCS11_PIN")
+	}
 	return module, token, pin, nil
 }
 
@@ -96,7 +102,11 @@ func NewSigner(cfg Config) (*Signer, error) {
 	if keyID == "" {
 		keyID = "01"
 	}
-	idBytes := []byte(keyID)
+	idBytes, err := hex.DecodeString(keyID)
+	if err != nil {
+		ctx.Close()
+		return nil, fmt.Errorf("decoding key ID %q as hex: %w", keyID, err)
+	}
 
 	kp, err := ctx.FindKeyPair(idBytes, []byte(cfg.KeyLabel))
 	if err != nil {
@@ -199,6 +209,81 @@ func (s *Signer) JWKS() jose.JSONWebKeySet {
 	return jose.JSONWebKeySet{
 		Keys: []jose.JSONWebKey{s.PublicJWK()},
 	}
+}
+
+// TimestampedJWKS extends a standard JWKS with per-key timestamps for
+// key rotation tracking. The "x-key-added" field is ignored by standard
+// JWKS consumers but preserved by this tool.
+type TimestampedJWKS struct {
+	Keys     []jose.JSONWebKey `json:"keys"`
+	KeyAdded map[string]int64  `json:"x-key-added,omitempty"`
+}
+
+// ToJoseJWKS converts to a standard jose.JSONWebKeySet (drops timestamps).
+func (t *TimestampedJWKS) ToJoseJWKS() jose.JSONWebKeySet {
+	return jose.JSONWebKeySet{Keys: t.Keys}
+}
+
+// MergeJWKS merges the current signing key with keys from a previous JWKS,
+// retaining old keys for a configurable duration to support key rotation.
+// Keys whose timestamp in KeyAdded is older than the retention period are
+// removed. The current key is always added with a fresh timestamp.
+// If a previous key has the same KeyID as the current key, it is replaced.
+func MergeJWKS(current jose.JSONWebKeySet, previous TimestampedJWKS, retention time.Duration) TimestampedJWKS {
+	now := time.Now()
+	cutoff := now.Add(-retention)
+	cutoffUnix := cutoff.Unix()
+
+	result := TimestampedJWKS{
+		KeyAdded: make(map[string]int64),
+	}
+
+	// Always include current key(s) first
+	currentIDs := make(map[string]bool)
+	for _, k := range current.Keys {
+		result.Keys = append(result.Keys, k)
+		result.KeyAdded[k.KeyID] = now.Unix()
+		currentIDs[k.KeyID] = true
+	}
+
+	// Retain previous keys that are not expired and not duplicates of current
+	for _, k := range previous.Keys {
+		if currentIDs[k.KeyID] {
+			continue // replaced by current key
+		}
+		addedUnix, hasTimestamp := previous.KeyAdded[k.KeyID]
+		if hasTimestamp && addedUnix < cutoffUnix {
+			continue // expired
+		}
+		// Preserve the timestamp, or stamp it now if missing
+		if !hasTimestamp {
+			addedUnix = now.Unix()
+		}
+		result.Keys = append(result.Keys, k)
+		result.KeyAdded[k.KeyID] = addedUnix
+	}
+
+	return result
+}
+
+// LoadTimestampedJWKS reads a TimestampedJWKS from a JSON file. Returns an
+// empty JWKS if the file does not exist.
+func LoadTimestampedJWKS(path string) (TimestampedJWKS, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return TimestampedJWKS{KeyAdded: make(map[string]int64)}, nil
+		}
+		return TimestampedJWKS{}, fmt.Errorf("reading JWKS %s: %w", path, err)
+	}
+	var jwks TimestampedJWKS
+	if err := json.Unmarshal(data, &jwks); err != nil {
+		return TimestampedJWKS{}, fmt.Errorf("parsing JWKS %s: %w", path, err)
+	}
+	if jwks.KeyAdded == nil {
+		jwks.KeyAdded = make(map[string]int64)
+	}
+	return jwks, nil
 }
 
 // SignFile reads a JSON file, signs it, and writes the JWS to a .jwt file.

@@ -14,16 +14,23 @@ import (
 // UUIDNamespace is the UUID v5 namespace for registry.siros.org schema IDs.
 var UUIDNamespace = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8") // DNS namespace
 
-// SchemaMetaSource represents the manually-authored fields from schema-meta.yaml.
-type SchemaMetaSource struct {
-	AttestationLoS     string `yaml:"attestation_los" json:"attestationLoS"`
-	BindingType        string `yaml:"binding_type" json:"bindingType"`
-	Version            string `yaml:"version,omitempty" json:"version,omitempty"`
-	TrustedAuthorities []any  `yaml:"trusted_authorities,omitempty" json:"trustedAuthorities,omitempty"`
-	RulebookURI        string `yaml:"rulebook_uri,omitempty" json:"rulebookURI,omitempty"`
+// TrustAuthority represents a trust framework reference per TS11 Section 4.3.3.
+type TrustAuthority struct {
+	FrameworkType string `yaml:"framework_type" json:"frameworkType"`
+	Value         string `yaml:"value" json:"value"`
+	IsLOTE        *bool  `yaml:"is_lote,omitempty" json:"isLOTE,omitempty"`
 }
 
-// SchemaURI represents a format-specific schema reference.
+// SchemaMetaSource represents the manually-authored fields from schema-meta.yaml.
+type SchemaMetaSource struct {
+	AttestationLoS     string           `yaml:"attestation_los" json:"attestationLoS"`
+	BindingType        string           `yaml:"binding_type" json:"bindingType"`
+	Version            string           `yaml:"version,omitempty" json:"version,omitempty"`
+	TrustedAuthorities []TrustAuthority `yaml:"trusted_authorities,omitempty" json:"trustedAuthorities,omitempty"`
+	RulebookURI        string           `yaml:"rulebook_uri,omitempty" json:"rulebookURI,omitempty"`
+}
+
+// SchemaURI represents a format-specific schema reference (TS11 Section 4.3.2).
 type SchemaURI struct {
 	FormatIdentifier string `json:"formatIdentifier"`
 	URI              string `json:"uri"`
@@ -31,14 +38,14 @@ type SchemaURI struct {
 
 // SchemaMeta is the full TS11 SchemaMeta object, combining authored and inferred fields.
 type SchemaMeta struct {
-	ID                 string      `json:"id"`
-	Version            string      `json:"version"`
-	AttestationLoS     string      `json:"attestationLoS"`
-	BindingType        string      `json:"bindingType"`
-	SupportedFormats   []string    `json:"supportedFormats"`
-	SchemaURIs         []SchemaURI `json:"schemaURIs"`
-	RulebookURI        string      `json:"rulebookURI,omitempty"`
-	TrustedAuthorities []any       `json:"trustedAuthorities,omitempty"`
+	ID                 string           `json:"id"`
+	Version            string           `json:"version"`
+	AttestationLoS     string           `json:"attestationLoS"`
+	BindingType        string           `json:"bindingType"`
+	SupportedFormats   []string         `json:"supportedFormats"`
+	SchemaURIs         []SchemaURI      `json:"schemaURIs"`
+	RulebookURI        string           `json:"rulebookURI,omitempty"`
+	TrustedAuthorities []TrustAuthority `json:"trustedAuthorities,omitempty"`
 }
 
 // FormatMapping maps file extensions to TS11 format identifiers.
@@ -46,6 +53,71 @@ var FormatMapping = map[string]string{
 	".vctm.json": "dc+sd-jwt",
 	".mdoc.json": "mso_mdoc",
 	".vc.json":   "jwt_vc_json",
+}
+
+// ValidAttestationLoS lists the normative TS11 attestation LoS values.
+var ValidAttestationLoS = map[string]bool{
+	"iso_18045_high":           true,
+	"iso_18045_moderate":       true,
+	"iso_18045_enhanced-basic": true,
+	"iso_18045_basic":          true,
+}
+
+// ValidBindingType lists the normative TS11 binding type values.
+var ValidBindingType = map[string]bool{
+	"claim":     true,
+	"key":       true,
+	"biometric": true,
+	"none":      true,
+}
+
+// ValidSupportedFormat returns true if the format identifier is one of the
+// normative TS11 supported formats.
+var ValidSupportedFormats = map[string]bool{
+	"dc+sd-jwt":      true,
+	"mso_mdoc":       true,
+	"jwt_vc_json":    true,
+	"jwt_vc_json-ld": true,
+	"ldp_vc":         true,
+}
+
+// ValidSupportedFormat checks whether a format string is in the normative enum.
+func ValidSupportedFormat(f string) bool {
+	return ValidSupportedFormats[f]
+}
+
+// NormalizeAttestationLoS maps legacy/friendly values to normative TS11 enum values.
+func NormalizeAttestationLoS(v string) string {
+	if ValidAttestationLoS[v] {
+		return v
+	}
+	legacy := map[string]string{
+		"high":           "iso_18045_high",
+		"moderate":       "iso_18045_moderate",
+		"substantial":    "iso_18045_moderate",
+		"enhanced-basic": "iso_18045_enhanced-basic",
+		"basic":          "iso_18045_basic",
+		"low":            "iso_18045_basic",
+	}
+	if mapped, ok := legacy[strings.ToLower(v)]; ok {
+		return mapped
+	}
+	return v
+}
+
+// NormalizeBindingType maps legacy/friendly values to normative TS11 enum values.
+func NormalizeBindingType(v string) string {
+	if ValidBindingType[v] {
+		return v
+	}
+	legacy := map[string]string{
+		"cnf":    "key",
+		"holder": "key",
+	}
+	if mapped, ok := legacy[strings.ToLower(v)]; ok {
+		return mapped
+	}
+	return v
 }
 
 // LegacyVCTMExtensions lists file extensions that indicate a legacy VCTM file
@@ -122,7 +194,8 @@ func GenerateID(org, slug string) string {
 
 // DetectFormats scans a directory for known credential format files matching a slug
 // and returns the detected format identifiers and file paths.
-// It checks FormatMapping extensions first, then falls back to bare .vctm extension.
+// It checks FormatMapping extensions first, then falls back to bare .vctm extension,
+// and finally checks for bare {slug}.json as a VCTM (dc+sd-jwt) file.
 func DetectFormats(dir, slug string) (formats []string, files map[string]string, err error) {
 	files = make(map[string]string)
 	entries, err := os.ReadDir(dir)
@@ -155,6 +228,15 @@ func DetectFormats(dir, slug string) (formats []string, files map[string]string,
 		}
 	}
 
+	// Check for bare {slug}.json as a VCTM file (repos like demo-credentials)
+	if _, found := files["dc+sd-jwt"]; !found {
+		bareJSON := filepath.Join(dir, slug+".json")
+		if _, statErr := os.Stat(bareJSON); statErr == nil {
+			formats = append(formats, "dc+sd-jwt")
+			files["dc+sd-jwt"] = bareJSON
+		}
+	}
+
 	return formats, files, nil
 }
 
@@ -162,8 +244,8 @@ func DetectFormats(dir, slug string) (formats []string, files map[string]string,
 func Infer(src *SchemaMetaSource, org, slug, baseURL string, formats []string, formatFiles map[string]string) *SchemaMeta {
 	sm := &SchemaMeta{
 		ID:                 GenerateID(org, slug),
-		AttestationLoS:     src.AttestationLoS,
-		BindingType:        src.BindingType,
+		AttestationLoS:     NormalizeAttestationLoS(src.AttestationLoS),
+		BindingType:        NormalizeBindingType(src.BindingType),
 		SupportedFormats:   formats,
 		TrustedAuthorities: src.TrustedAuthorities,
 	}

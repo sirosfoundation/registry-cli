@@ -61,7 +61,19 @@ sources:
 
   # Explicit repository
   - "git:https://github.com/org/repo.git"
+
+  # Local directory with explicit organization label
+  - url: "file:///path/to/local/credentials"
+    organization: "MyOrg"
+
+  # Remote repo with custom org label
+  - url: "git:https://github.com/other/repo.git"
+    organization: "CustomLabel"
 ```
+
+Source entries can be plain strings or structs with `url` and optional
+`organization` fields. Local (`file://`) sources default to organization
+"Local" if no label is provided.
 
 ## Schema-meta
 
@@ -83,8 +95,36 @@ These are discovered automatically from the vctm branch of each repository.
 | `pkg/discovery` | Source resolution, GitHub topic search, repo cloning |
 | `pkg/schemameta` | TS11 schema-meta parsing, inference, validation |
 | `pkg/render` | HTML template rendering, markdown conversion |
-| `pkg/jwssign` | JWS signing (dev, SoftHSM, YubiHSM) |
-| `pkg/registry` | Registry data structures |
+| `pkg/jwssign` | JWS signing (dev, SoftHSM, YubiHSM) via PKCS#11 |
+| `pkg/apihandler` | TS11 REST API with filtering, pagination, JWS-signed responses |
+| `pkg/ts11compliance` | TS11 specification compliance test suite |
+| `pkg/mdcred` | Markdown-based credential conversion |
+
+## Serve (development)
+
+```sh
+registry-cli serve --sources sources.yaml --output dist --port 8080
+```
+
+## Docker
+
+```sh
+# Build and run with docker compose
+docker compose up --build
+
+# Or build the image directly
+docker build -t registry-cli:latest .
+docker run -p 8080:8080 -v ./sources:/data/sources:ro registry-cli:latest
+```
+
+## Testing
+
+```sh
+make test              # Unit tests
+make test-softhsm      # Include SoftHSM PKCS#11 integration tests
+make coverage           # Coverage report
+make lint               # Run linter
+```
 
 ## License
 

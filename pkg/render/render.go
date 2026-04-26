@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/microcosm-cc/bluemonday"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 
@@ -45,6 +46,21 @@ type CredentialData struct {
 	SourceRepo string
 }
 
+// AttributeData holds a single attribute (claim) with references to the
+// credentials that define it.
+type AttributeData struct {
+	Path        string // dot-joined claim path
+	DisplayName string // first non-empty display name found
+	Credentials []AttributeCredRef
+}
+
+// AttributeCredRef links an attribute back to a credential.
+type AttributeCredRef struct {
+	Org  string
+	Slug string
+	Name string // credential display name or slug
+}
+
 // SiteData holds the data for rendering the site index page.
 type SiteData struct {
 	BaseURL     string
@@ -52,6 +68,7 @@ type SiteData struct {
 	BuildTime   string
 	Orgs        []OrgData
 	TS11Count   int
+	Attributes  []AttributeData
 }
 
 // Renderer renders HTML pages from Go templates.
@@ -148,6 +165,57 @@ func (r *Renderer) RenderAPIDocs(outputDir string, data SiteData) error {
 	return r.renderToFile(filepath.Join(docsDir, "api.html"), "api.html", data)
 }
 
+// RenderAttributes renders the Catalogue of Attributes page.
+func (r *Renderer) RenderAttributes(outputDir string, data SiteData) error {
+	docsDir := filepath.Join(outputDir, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		return err
+	}
+	return r.renderToFile(filepath.Join(docsDir, "attributes.html"), "attributes.html", data)
+}
+
+// CollectAttributes aggregates claims from all credentials into a deduplicated
+// cross-cutting index. Claims with the same dot-path are merged, collecting
+// references to all credentials that define them.
+func CollectAttributes(credentials []CredentialData) []AttributeData {
+	index := make(map[string]*AttributeData)
+	var order []string
+
+	for _, cred := range credentials {
+		if cred.VCTM == nil || len(cred.VCTM.Claims) == 0 {
+			continue
+		}
+		credName := cred.Slug
+		if cred.VCTM.Name != "" {
+			credName = cred.VCTM.Name
+		}
+		ref := AttributeCredRef{
+			Org:  cred.Org,
+			Slug: cred.Slug,
+			Name: credName,
+		}
+		for _, claim := range cred.VCTM.Claims {
+			p := strings.Join(claim.Path, ".")
+			if _, exists := index[p]; !exists {
+				index[p] = &AttributeData{Path: p}
+				order = append(order, p)
+			}
+			ad := index[p]
+			ad.Credentials = append(ad.Credentials, ref)
+			// Use the first non-empty display name
+			if ad.DisplayName == "" && len(claim.Display) > 0 && claim.Display[0].Name != "" {
+				ad.DisplayName = claim.Display[0].Name
+			}
+		}
+	}
+
+	result := make([]AttributeData, 0, len(order))
+	for _, p := range order {
+		result = append(result, *index[p])
+	}
+	return result
+}
+
 // RenderExtraDocPages renders any additional HTML templates loaded from
 // the override directory that aren't part of the built-in set.
 // They are rendered to docs/{name} in the output directory.
@@ -160,6 +228,7 @@ func (r *Renderer) RenderExtraDocPages(outputDir string, data SiteData) error {
 		"rulebook.html":   true,
 		"ts11.html":       true,
 		"api.html":        true,
+		"attributes.html": true,
 	}
 	docsDir := filepath.Join(outputDir, "docs")
 	if err := os.MkdirAll(docsDir, 0o755); err != nil {
@@ -185,7 +254,9 @@ func (r *Renderer) renderToFile(path, templateName string, data any) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
-// RenderMarkdown converts markdown content to HTML.
+// RenderMarkdown converts markdown content to sanitized HTML.
+// The output is sanitized with bluemonday to prevent XSS from untrusted
+// markdown sources (e.g. external git repositories).
 func RenderMarkdown(markdown []byte) (template.HTML, error) {
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.Table),
@@ -194,7 +265,9 @@ func RenderMarkdown(markdown []byte) (template.HTML, error) {
 	if err := md.Convert(markdown, &buf); err != nil {
 		return "", fmt.Errorf("rendering markdown: %w", err)
 	}
-	return template.HTML(buf.String()), nil
+	p := bluemonday.UGCPolicy()
+	sanitized := p.SanitizeBytes(buf.Bytes())
+	return template.HTML(sanitized), nil
 }
 
 // CopyStaticAssets copies static files (CSS, images) from a source directory

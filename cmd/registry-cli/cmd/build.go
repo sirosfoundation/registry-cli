@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sirosfoundation/registry-cli/pkg/attributes"
 	"github.com/sirosfoundation/registry-cli/pkg/discovery"
 	"github.com/sirosfoundation/registry-cli/pkg/mdcred"
 	"github.com/sirosfoundation/registry-cli/pkg/render"
@@ -147,12 +148,21 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// 5c. Generate TS11 §2 Catalogue of Attributes from VCTM claims
+	attrInputs := credentialInputsFromData(credentials)
+	catalogue := attributes.InferFromCredentials(attrInputs, flagBaseURL)
+	if writeErr := writeAttributeOutputs(flagOutput, catalogue); writeErr != nil {
+		return fmt.Errorf("writing attribute outputs: %w", writeErr)
+	}
+	logger.Info("generated attribute catalogue", "attributes", len(catalogue))
+
 	siteData := render.SiteData{
 		BaseURL:     flagBaseURL,
 		Credentials: credentials,
 		BuildTime:   time.Now().UTC().Format(time.RFC3339),
 		Orgs:        orgs,
 		TS11Count:   ts11Count,
+		Attributes:  render.CollectAttributes(credentials),
 	}
 
 	if err := renderer.RenderIndex(flagOutput, siteData); err != nil {
@@ -177,6 +187,9 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	if err := renderer.RenderAPIDocs(flagOutput, siteData); err != nil {
 		return fmt.Errorf("rendering API docs: %w", err)
 	}
+	if err := renderer.RenderAttributes(flagOutput, siteData); err != nil {
+		return fmt.Errorf("rendering attributes catalogue: %w", err)
+	}
 	if err := renderer.RenderExtraDocPages(flagOutput, siteData); err != nil {
 		return fmt.Errorf("rendering extra doc pages: %w", err)
 	}
@@ -200,7 +213,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 
 	logger.Info("build complete", "output", flagOutput, "schemas", len(schemas),
-		"credentials", len(credentials))
+		"credentials", len(credentials), "attributes", len(siteData.Attributes))
 	return nil
 }
 
@@ -218,8 +231,11 @@ func buildResolvers() []discovery.Resolver {
 }
 
 func processRepo(repo discovery.ResolvedRepo, workDir, baseURL string, logger *slog.Logger) ([]*schemameta.SchemaMeta, error) {
-	// Extract org name from URL
-	org := extractOrg(repo.URL)
+	// Determine org name: explicit label > URL inference
+	org := repo.Organization
+	if org == "" {
+		org = extractOrg(repo.URL)
+	}
 	if org == "" {
 		return nil, fmt.Errorf("cannot determine org from URL %q", repo.URL)
 	}
@@ -431,7 +447,7 @@ func extractRepoName(cloneURL string) string {
 }
 
 func cloneRepo(url, branch, dest string) error {
-	return execGit("clone", "--depth", "1", "--branch", branch, url, dest)
+	return execGit("clone", "--depth", "1", "--branch", branch, "--", url, dest)
 }
 
 // buildCredentialData constructs render.CredentialData for each schema,
@@ -451,7 +467,10 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 
 		// Find the repo containing this credential
 		for _, repo := range repos {
-			repoOrg := extractOrg(repo.URL)
+			repoOrg := repo.Organization
+			if repoOrg == "" {
+				repoOrg = extractOrg(repo.URL)
+			}
 			if repoOrg != org {
 				continue
 			}
@@ -466,7 +485,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 
 			// Verify this repo has either a schema-meta file or a VCTM file for this slug
 			found := false
-			for _, ext := range []string{".schema-meta.yaml", ".schema-meta.json", ".vctm.json", ".vctm"} {
+			for _, ext := range []string{".schema-meta.yaml", ".schema-meta.json", ".vctm.json", ".vctm", ".json"} {
 				if _, err := os.Stat(filepath.Join(repoDir, slug+ext)); err == nil {
 					found = true
 					break
@@ -491,7 +510,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 				}
 			}
 
-			// Read and parse VCTM JSON (try .vctm.json first, then bare .vctm)
+			// Read and parse VCTM JSON (try .vctm.json first, then bare .vctm, then bare .json)
 			vctmPath := filepath.Join(repoDir, slug+".vctm.json")
 			if data, err := os.ReadFile(vctmPath); err == nil {
 				cred.RawVCTMJSON = prettyFormatJSON(data)
@@ -507,6 +526,16 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 					var vctm render.VCTMData
 					if jsonErr := json.Unmarshal(data, &vctm); jsonErr == nil {
 						cred.VCTM = &vctm
+					}
+				} else {
+					// Try bare .json (repos like demo-credentials)
+					bareJSONPath := filepath.Join(repoDir, slug+".json")
+					if data, err := os.ReadFile(bareJSONPath); err == nil {
+						cred.RawVCTMJSON = prettyFormatJSON(data)
+						var vctm render.VCTMData
+						if jsonErr := json.Unmarshal(data, &vctm); jsonErr == nil {
+							cred.VCTM = &vctm
+						}
 					}
 				}
 			}
@@ -563,6 +592,11 @@ func orgSlugFromID(sm *schemameta.SchemaMeta, baseURL string) (org, slug string)
 			// Also handle bare .vctm extension
 			if strings.HasSuffix(filename, ".vctm") {
 				slug = strings.TrimSuffix(filename, ".vctm")
+				return
+			}
+			// Also handle bare .json extension (repos like demo-credentials)
+			if strings.HasSuffix(filename, ".json") {
+				slug = strings.TrimSuffix(filename, ".json")
 				return
 			}
 		}
@@ -679,13 +713,26 @@ func buildFormatInfo(org, slug, repoDir string) []render.FormatInfo {
 		}
 	}
 	// Also check for bare .vctm (legacy) if no .vctm.json was found
-	if len(formats) == 0 || formats[0].Name != "SD-JWT" {
+	hasSDJWT := false
+	for _, f := range formats {
+		if f.Name == "SD-JWT" {
+			hasSDJWT = true
+			break
+		}
+	}
+	if !hasSDJWT {
 		if _, err := os.Stat(filepath.Join(repoDir, slug+".vctm")); err == nil {
-			// Prepend SD-JWT entry for bare .vctm
 			formats = append([]render.FormatInfo{{
 				Name:  "SD-JWT",
 				Label: "SD-JWT VC Type Metadata",
 				File:  "/" + org + "/" + slug + ".vctm",
+			}}, formats...)
+		} else if _, err := os.Stat(filepath.Join(repoDir, slug+".json")); err == nil {
+			// Bare .json file (repos like demo-credentials)
+			formats = append([]render.FormatInfo{{
+				Name:  "SD-JWT",
+				Label: "SD-JWT VC Type Metadata",
+				File:  "/" + org + "/" + slug + ".json",
 			}}, formats...)
 		}
 	}
@@ -693,6 +740,7 @@ func buildFormatInfo(org, slug, repoDir string) []render.FormatInfo {
 }
 
 func copyFormatFiles(repoDir, outputDir, org, slug string) {
+	logger := slog.Default()
 	// Copy files from FormatMapping
 	for ext := range schemameta.FormatMapping {
 		srcPath := filepath.Join(repoDir, slug+ext)
@@ -701,14 +749,124 @@ func copyFormatFiles(repoDir, outputDir, org, slug string) {
 			continue
 		}
 		dstDir := filepath.Join(outputDir, org)
-		_ = os.MkdirAll(dstDir, 0o755)
-		_ = os.WriteFile(filepath.Join(dstDir, slug+ext), data, 0o644)
+		if err := os.MkdirAll(dstDir, 0o755); err != nil {
+			logger.Warn("creating format dir", "dir", dstDir, "error", err)
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(dstDir, slug+ext), data, 0o644); err != nil {
+			logger.Warn("writing format file", "file", slug+ext, "error", err)
+		}
 	}
 	// Also copy bare .vctm files
 	bareVCTM := filepath.Join(repoDir, slug+".vctm")
 	if data, err := os.ReadFile(bareVCTM); err == nil {
 		dstDir := filepath.Join(outputDir, org)
-		_ = os.MkdirAll(dstDir, 0o755)
-		_ = os.WriteFile(filepath.Join(dstDir, slug+".vctm"), data, 0o644)
+		if err := os.MkdirAll(dstDir, 0o755); err != nil {
+			logger.Warn("creating format dir", "dir", dstDir, "error", err)
+		} else if err := os.WriteFile(filepath.Join(dstDir, slug+".vctm"), data, 0o644); err != nil {
+			logger.Warn("writing format file", "file", slug+".vctm", "error", err)
+		}
 	}
+	// Also copy bare .json files (repos like demo-credentials)
+	bareJSON := filepath.Join(repoDir, slug+".json")
+	if data, err := os.ReadFile(bareJSON); err == nil {
+		dstDir := filepath.Join(outputDir, org)
+		if err := os.MkdirAll(dstDir, 0o755); err != nil {
+			logger.Warn("creating format dir", "dir", dstDir, "error", err)
+		} else if err := os.WriteFile(filepath.Join(dstDir, slug+".json"), data, 0o644); err != nil {
+			logger.Warn("writing format file", "file", slug+".json", "error", err)
+		}
+	}
+}
+
+// credentialInputsFromData converts render.CredentialData to attributes.CredentialInput
+// for the TS11 §2 Catalogue of Attributes inference.
+func credentialInputsFromData(credentials []render.CredentialData) []attributes.CredentialInput {
+	var inputs []attributes.CredentialInput
+	for _, cred := range credentials {
+		if cred.VCTM == nil || len(cred.VCTM.Claims) == 0 {
+			continue
+		}
+		ci := attributes.CredentialInput{
+			SchemaID: "",
+			Org:      cred.Org,
+			Slug:     cred.Slug,
+			Name:     cred.Slug,
+			VCT:      cred.VCTM.VCT,
+		}
+		if cred.Schema != nil {
+			ci.SchemaID = cred.Schema.ID
+		}
+		if cred.VCTM.Name != "" {
+			ci.Name = cred.VCTM.Name
+		}
+		for _, claim := range cred.VCTM.Claims {
+			input := attributes.ClaimInput{
+				Path: claim.Path,
+			}
+			if len(claim.Display) > 0 {
+				input.DisplayName = claim.Display[0].Name
+				input.DisplayLang = claim.Display[0].Locale
+			}
+			ci.Claims = append(ci.Claims, input)
+		}
+		inputs = append(inputs, ci)
+	}
+	return inputs
+}
+
+// writeAttributeOutputs writes the TS11 §2 attribute catalogue API files.
+func writeAttributeOutputs(outputDir string, catalogue []attributes.Attribute) error {
+	attrDir := filepath.Join(outputDir, "api", "v1", "attributes")
+	attrSchemaDir := filepath.Join(attrDir, "schemas")
+	if err := os.MkdirAll(attrSchemaDir, 0o755); err != nil {
+		return err
+	}
+
+	// Write individual attribute JSON files
+	for _, attr := range catalogue {
+		data, err := json.MarshalIndent(attr, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling attribute %s: %w", attr.Identifier, err)
+		}
+		// Use a filename-safe version of the identifier
+		filename := attrFilename(attr.Identifier) + ".json"
+		if err := os.WriteFile(filepath.Join(attrDir, filename), data, 0o644); err != nil {
+			return fmt.Errorf("writing attribute %s: %w", filename, err)
+		}
+	}
+
+	// Write aggregate attributes list
+	listPayload := map[string]any{
+		"total":  len(catalogue),
+		"limit":  len(catalogue),
+		"offset": 0,
+		"data":   catalogue,
+	}
+	data, err := json.MarshalIndent(listPayload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling attributes list: %w", err)
+	}
+	apiDir := filepath.Join(outputDir, "api", "v1")
+	if err := os.WriteFile(filepath.Join(apiDir, "attributes.json"), data, 0o644); err != nil {
+		return err
+	}
+
+	// Write JSON Schemas for each attribute
+	schemas := attributes.GenerateSchemas(catalogue)
+	for filename, schemaJSON := range schemas {
+		if err := os.WriteFile(filepath.Join(attrSchemaDir, filename), schemaJSON, 0o644); err != nil {
+			return fmt.Errorf("writing attribute schema %s: %w", filename, err)
+		}
+	}
+
+	return nil
+}
+
+// attrFilename converts an attribute identifier like "urn:siros:attr:given-name:abc123"
+// into a safe filename "given-name-abc123".
+func attrFilename(id string) string {
+	// Strip urn:siros:attr: prefix and replace colons with dashes
+	s := strings.TrimPrefix(id, "urn:siros:attr:")
+	return strings.ReplaceAll(s, ":", "-")
 }

@@ -3,6 +3,7 @@ package discovery
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -10,7 +11,7 @@ import (
 
 // SourceManifest is the top-level structure of a sources.yaml file.
 type SourceManifest struct {
-	Sources  []string       `yaml:"sources"`
+	Sources  []SourceEntry  `yaml:"sources"`
 	Defaults SourceDefaults `yaml:"defaults"`
 }
 
@@ -19,11 +20,41 @@ type SourceDefaults struct {
 	Branch string `yaml:"branch"`
 }
 
+// SourceEntry represents a source in the manifest. It can be either a plain
+// string URI or a struct with an explicit organization label.
+//
+// Plain string:
+//
+//	sources:
+//	  - "git:https://github.com/org/repo.git"
+//
+// Struct with organization:
+//
+//	sources:
+//	  - url: "file:///path/to/local/dir"
+//	    organization: "MyOrg"
+type SourceEntry struct {
+	URL          string `yaml:"url"`
+	Organization string `yaml:"organization,omitempty"`
+}
+
+// UnmarshalYAML allows SourceEntry to be parsed from either a plain string
+// or a mapping with url and organization fields.
+func (s *SourceEntry) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		s.URL = value.Value
+		return nil
+	}
+	type plain SourceEntry
+	return value.Decode((*plain)(s))
+}
+
 // ResolvedRepo is a concrete git repository to fetch credential data from.
 type ResolvedRepo struct {
-	URL    string // git clone URL
-	Branch string // branch to fetch from
-	Origin string // how this repo was discovered (e.g. "explicit", "github:topic/vctm")
+	URL          string // git clone URL
+	Branch       string // branch to fetch from
+	Origin       string // how this repo was discovered (e.g. "explicit", "github:topic/vctm")
+	Organization string // explicit organization label (empty = infer from URL)
 }
 
 // Resolver resolves meta-sources into concrete repos.
@@ -61,22 +92,36 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 	explicit := make(map[string]ResolvedRepo)
 	var discovered []ResolvedRepo
 
-	for _, source := range manifest.Sources {
+	for _, entry := range manifest.Sources {
+		source := entry.URL
+
 		if strings.HasPrefix(source, "git:") {
 			url := strings.TrimPrefix(source, "git:")
 			explicit[url] = ResolvedRepo{
-				URL:    url,
-				Branch: manifest.Defaults.Branch,
-				Origin: "explicit",
+				URL:          url,
+				Branch:       manifest.Defaults.Branch,
+				Origin:       "explicit",
+				Organization: entry.Organization,
 			}
 			continue
 		}
 
 		if strings.HasPrefix(source, "file://") {
+			localPath := strings.TrimPrefix(source, "file://")
+			// Validate: resolve symlinks and ensure it's an absolute, clean path
+			cleanPath := filepath.Clean(localPath)
+			if !filepath.IsAbs(cleanPath) {
+				return nil, fmt.Errorf("file:// source must be an absolute path: %q", source)
+			}
+			org := entry.Organization
+			if org == "" {
+				org = "Local"
+			}
 			explicit[source] = ResolvedRepo{
-				URL:    source,
-				Branch: "",
-				Origin: "local",
+				URL:          source,
+				Branch:       "",
+				Origin:       "local",
+				Organization: org,
 			}
 			continue
 		}
@@ -93,6 +138,9 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 						repos[i].Branch = manifest.Defaults.Branch
 					}
 					repos[i].Origin = source
+					if entry.Organization != "" {
+						repos[i].Organization = entry.Organization
+					}
 				}
 				discovered = append(discovered, repos...)
 				resolved = true

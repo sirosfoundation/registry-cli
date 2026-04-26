@@ -1,0 +1,22 @@
+# Local development: build and serve a local credential repository.
+#
+# Usage:
+#   1. Put your sources.yaml in ./sources/ (or mount a directory)
+#   2. docker compose up
+#   3. Open http://localhost:8080
+#
+# For local credential files, mount them and use file:// sources in sources.yaml.
+services:
+  registry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./sources:/data/sources:ro
+      - ./output:/data/output
+      # Uncomment to enable PKCS#11 signing:
+      # - ./tokens:/data/tokens
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}

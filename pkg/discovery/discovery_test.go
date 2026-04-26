@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadManifest(t *testing.T) {
@@ -25,8 +26,40 @@ defaults:
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(m.Sources))
 	assert.Equal(t, "vctm", m.Defaults.Branch)
-	assert.Equal(t, "github:topic/vctm?org=sirosfoundation", m.Sources[0])
-	assert.Equal(t, "git:https://github.com/example/repo.git", m.Sources[1])
+	assert.Equal(t, "github:topic/vctm?org=sirosfoundation", m.Sources[0].URL)
+	assert.Equal(t, "git:https://github.com/example/repo.git", m.Sources[1].URL)
+}
+
+func TestLoadManifest_MixedFormat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sources.yaml")
+
+	content := `sources:
+  - git:https://github.com/org/repo.git
+  - url: "file:///path/to/local"
+    organization: "MyOrg"
+  - url: "git:https://github.com/other/repo.git"
+    organization: "CustomLabel"
+defaults:
+  branch: main
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	m, err := LoadManifest(path)
+	require.NoError(t, err)
+	assert.Equal(t, 3, len(m.Sources))
+
+	// Plain string entry
+	assert.Equal(t, "git:https://github.com/org/repo.git", m.Sources[0].URL)
+	assert.Empty(t, m.Sources[0].Organization)
+
+	// Struct entry with organization
+	assert.Equal(t, "file:///path/to/local", m.Sources[1].URL)
+	assert.Equal(t, "MyOrg", m.Sources[1].Organization)
+
+	// Struct entry with git URL and org
+	assert.Equal(t, "git:https://github.com/other/repo.git", m.Sources[2].URL)
+	assert.Equal(t, "CustomLabel", m.Sources[2].Organization)
 }
 
 func TestLoadManifest_DefaultBranch(t *testing.T) {
@@ -77,7 +110,7 @@ func (r *mockResolver) Resolve(source string) ([]ResolvedRepo, error) {
 
 func TestResolveAll_ExplicitOnly(t *testing.T) {
 	m := &SourceManifest{
-		Sources:  []string{"git:https://github.com/org/repo1.git", "git:https://github.com/org/repo2.git"},
+		Sources:  []SourceEntry{{URL: "git:https://github.com/org/repo1.git"}, {URL: "git:https://github.com/org/repo2.git"}},
 		Defaults: SourceDefaults{Branch: "vctm"},
 	}
 
@@ -92,7 +125,7 @@ func TestResolveAll_ExplicitOnly(t *testing.T) {
 
 func TestResolveAll_MetaSource(t *testing.T) {
 	m := &SourceManifest{
-		Sources:  []string{"test:discover"},
+		Sources:  []SourceEntry{{URL: "test:discover"}},
 		Defaults: SourceDefaults{Branch: "vctm"},
 	}
 
@@ -115,9 +148,9 @@ func TestResolveAll_MetaSource(t *testing.T) {
 
 func TestResolveAll_ExplicitTakesPrecedence(t *testing.T) {
 	m := &SourceManifest{
-		Sources: []string{
-			"git:https://github.com/org/repo1.git",
-			"test:discover",
+		Sources: []SourceEntry{
+			{URL: "git:https://github.com/org/repo1.git"},
+			{URL: "test:discover"},
 		},
 		Defaults: SourceDefaults{Branch: "main"},
 	}
@@ -144,7 +177,7 @@ func TestResolveAll_ExplicitTakesPrecedence(t *testing.T) {
 
 func TestResolveAll_UnknownScheme(t *testing.T) {
 	m := &SourceManifest{
-		Sources:  []string{"unknown:something"},
+		Sources:  []SourceEntry{{URL: "unknown:something"}},
 		Defaults: SourceDefaults{Branch: "vctm"},
 	}
 
@@ -155,7 +188,7 @@ func TestResolveAll_UnknownScheme(t *testing.T) {
 
 func TestResolveAll_FileURL(t *testing.T) {
 	m := &SourceManifest{
-		Sources:  []string{"file:///home/user/credentials"},
+		Sources:  []SourceEntry{{URL: "file:///home/user/credentials"}},
 		Defaults: SourceDefaults{Branch: "vctm"},
 	}
 
@@ -165,13 +198,14 @@ func TestResolveAll_FileURL(t *testing.T) {
 	assert.Equal(t, "file:///home/user/credentials", repos[0].URL)
 	assert.Equal(t, "local", repos[0].Origin)
 	assert.Equal(t, "", repos[0].Branch)
+	assert.Equal(t, "Local", repos[0].Organization, "file:// sources default to 'Local' org")
 }
 
 func TestResolveAll_FileURLAndGit(t *testing.T) {
 	m := &SourceManifest{
-		Sources: []string{
-			"file:///home/user/credentials",
-			"git:https://github.com/org/repo.git",
+		Sources: []SourceEntry{
+			{URL: "file:///home/user/credentials"},
+			{URL: "git:https://github.com/org/repo.git"},
 		},
 		Defaults: SourceDefaults{Branch: "main"},
 	}
@@ -193,4 +227,99 @@ func TestResolveAll_FileURLAndGit(t *testing.T) {
 	assert.Equal(t, "file:///home/user/credentials", local.URL)
 	assert.Equal(t, "https://github.com/org/repo.git", remote.URL)
 	assert.Equal(t, "main", remote.Branch)
+}
+
+func TestResolveAll_FileURLWithExplicitOrg(t *testing.T) {
+	m := &SourceManifest{
+		Sources:  []SourceEntry{{URL: "file:///data/creds", Organization: "CustomOrg"}},
+		Defaults: SourceDefaults{Branch: "vctm"},
+	}
+
+	repos, err := ResolveAll(m, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(repos))
+	assert.Equal(t, "CustomOrg", repos[0].Organization, "explicit org label overrides default")
+}
+
+func TestResolveAll_GitWithExplicitOrg(t *testing.T) {
+	m := &SourceManifest{
+		Sources:  []SourceEntry{{URL: "git:https://github.com/org/repo.git", Organization: "OverrideOrg"}},
+		Defaults: SourceDefaults{Branch: "main"},
+	}
+
+	repos, err := ResolveAll(m, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(repos))
+	assert.Equal(t, "OverrideOrg", repos[0].Organization)
+}
+
+func TestResolveAll_MetaSourceWithExplicitOrg(t *testing.T) {
+	m := &SourceManifest{
+		Sources:  []SourceEntry{{URL: "test:discover", Organization: "MetaOrg"}},
+		Defaults: SourceDefaults{Branch: "vctm"},
+	}
+
+	resolver := &mockResolver{
+		prefix: "test:",
+		repos: []ResolvedRepo{
+			{URL: "https://github.com/a/repo1.git"},
+			{URL: "https://github.com/b/repo2.git"},
+		},
+	}
+
+	repos, err := ResolveAll(m, []Resolver{resolver})
+	require.NoError(t, err)
+	assert.Equal(t, 2, len(repos))
+	for _, r := range repos {
+		assert.Equal(t, "MetaOrg", r.Organization, "all resolved repos should inherit the source org label")
+	}
+}
+
+func TestSourceEntryUnmarshalYAML(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantURL string
+		wantOrg string
+	}{
+		{
+			name:    "plain string",
+			yaml:    `"git:https://example.com/repo.git"`,
+			wantURL: "git:https://example.com/repo.git",
+			wantOrg: "",
+		},
+		{
+			name:    "struct with org",
+			yaml:    "url: file:///data/creds\norganization: MyOrg",
+			wantURL: "file:///data/creds",
+			wantOrg: "MyOrg",
+		},
+		{
+			name:    "struct without org",
+			yaml:    "url: git:https://example.com/repo.git",
+			wantURL: "git:https://example.com/repo.git",
+			wantOrg: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var entry SourceEntry
+			err := yaml.Unmarshal([]byte(tt.yaml), &entry)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantURL, entry.URL)
+			assert.Equal(t, tt.wantOrg, entry.Organization)
+		})
+	}
+}
+
+func TestResolveAll_FileURL_RelativePathRejected(t *testing.T) {
+	m := &SourceManifest{
+		Sources:  []SourceEntry{{URL: "file://relative/path"}},
+		Defaults: SourceDefaults{Branch: "vctm"},
+	}
+
+	_, err := ResolveAll(m, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "absolute path")
 }

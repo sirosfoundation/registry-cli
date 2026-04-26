@@ -1,5 +1,4 @@
 package mdcred
-package mdcred
 
 import (
 	"os"
@@ -124,4 +123,104 @@ func TestConvertDir_EmptyDir(t *testing.T) {
 func TestConvertDir_NonexistentDir(t *testing.T) {
 	_, err := ConvertDir("/nonexistent/dir", "https://example.com")
 	assert.Error(t, err)
+}
+
+func TestConvertDir_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+
+	md := `---
+vct: https://example.com/credentials/test
+---
+
+# Test Credential
+
+A test credential for unit testing.
+
+## Claims
+
+- ` + "`email`" + ` (string): Email address [mandatory]
+- ` + "`name`" + ` (string): Full name
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.md"), []byte(md), 0o644))
+
+	results, err := ConvertDir(dir, "https://example.com")
+	require.NoError(t, err)
+	require.NotEmpty(t, results, "should have converted at least one credential")
+
+	assert.Equal(t, "test", results[0].Slug)
+	assert.NotEmpty(t, results[0].Files, "should have generated at least one format file")
+
+	// Verify at least one output file was written
+	for _, path := range results[0].Files {
+		_, statErr := os.Stat(path)
+		assert.NoError(t, statErr, "output file should exist: %s", path)
+	}
+}
+
+func TestConvertDir_SubdirectoryDiscovery(t *testing.T) {
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "creds")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+
+	md := `---
+vct: https://example.com/credentials/nested
+---
+
+# Nested Credential
+
+A nested credential.
+
+## Claims
+
+- ` + "`id`" + ` (string): Identifier
+`
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "nested.md"), []byte(md), 0o644))
+
+	results, err := ConvertDir(dir, "https://example.com")
+	require.NoError(t, err)
+	require.NotEmpty(t, results)
+	assert.Equal(t, "nested", results[0].Slug)
+}
+
+func TestConvertFile_Success(t *testing.T) {
+	dir := t.TempDir()
+
+	md := `---
+vct: https://example.com/credentials/direct
+---
+
+# Direct Credential
+
+Testing convertFile directly.
+
+## Claims
+
+- ` + "`given_name`" + ` (string): Given name [mandatory]
+`
+	mdPath := filepath.Join(dir, "direct.md")
+	require.NoError(t, os.WriteFile(mdPath, []byte(md), 0o644))
+
+	result, err := convertFile(mdPath, "direct", dir, "https://example.com")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	assert.Equal(t, "direct", result.Slug)
+	assert.NotEmpty(t, result.Files)
+}
+
+func TestConvertFile_InvalidMarkdown(t *testing.T) {
+	dir := t.TempDir()
+
+	// Markdown with vct front matter but no claims or valid structure
+	md := "---\nvct: https://example.com/test\n---\n"
+	mdPath := filepath.Join(dir, "bad.md")
+	require.NoError(t, os.WriteFile(mdPath, []byte(md), 0o644))
+
+	result, err := convertFile(mdPath, "bad", dir, "https://example.com")
+	// mtcvctm may return an error or an empty result depending on the version
+	if err != nil {
+		assert.Contains(t, err.Error(), "name is required")
+	} else {
+		// If no error, result should still be valid (possibly with 0 claims)
+		assert.NotNil(t, result)
+	}
 }

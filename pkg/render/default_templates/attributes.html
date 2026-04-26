@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Catalogue of Attributes — Credential Registry</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Credential Registry</h1>
+    <p>Catalogue of Attributes</p>
+    <nav>
+      <a href="/">Home</a>
+      <a href="/docs/attributes.html">Attributes</a>
+      <a href="/docs/ts11.html">TS11 Info</a>
+      <a href="/docs/api.html">API</a>
+    </nav>
+  </header>
+  <main>
+    <h2>Catalogue of Attributes (TS11 §4.2)</h2>
+    <p>Cross-cutting index of all claims/attributes defined across registered credentials.</p>
+    <p>Total: {{len .Attributes}} attribute(s) across {{len .Credentials}} credential(s).</p>
+
+    {{if .Attributes}}
+    <table>
+      <thead>
+        <tr>
+          <th>Attribute Path</th>
+          <th>Display Name</th>
+          <th>Used By</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Attributes}}
+        <tr>
+          <td><code>{{.Path}}</code></td>
+          <td>{{.DisplayName}}</td>
+          <td>
+            {{range $i, $c := .Credentials}}{{if $i}}, {{end}}<a href="/{{$c.Org}}/{{$c.Slug}}/">{{$c.Name}}</a>{{end}}
+          </td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p>No attributes found. Attributes are extracted from SD-JWT VC Type Metadata claims.</p>
+    {{end}}
+  </main>
+  <footer>
+    <p>Built: {{.BuildTime}}</p>
+    <p><a href="/">← Back to registry</a></p>
+  </footer>
+</body>
+</html>

@@ -30,16 +30,40 @@ func NewValidator() (*Validator, error) {
 	return &Validator{schema: schema}, nil
 }
 
+// ValidateRaw checks a raw map against the TS11 JSON schema.
+// This is used to test additionalProperties enforcement.
+func (v *Validator) ValidateRaw(obj any) error {
+	return v.schema.Validate(obj)
+}
+
 // Validate checks a SchemaMeta object against the TS11 JSON schema.
 func (v *Validator) Validate(sm *SchemaMeta) error {
-	// Require non-empty governance fields beyond JSON schema structural validation
+	// Require non-empty governance fields beyond JSON schema structural validation.
+	// Go serializes empty strings as "", which passes JSON Schema "type": "string",
+	// but TS11 requires these fields to carry meaningful values.
+	if sm.Version == "" {
+		return fmt.Errorf("version is required for TS11 compliance")
+	}
 	if sm.AttestationLoS == "" {
 		return fmt.Errorf("attestationLoS is required for TS11 compliance")
 	}
 	if sm.BindingType == "" {
 		return fmt.Errorf("bindingType is required for TS11 compliance")
 	}
+	if sm.RulebookURI == "" {
+		return fmt.Errorf("rulebookURI is required for TS11 compliance")
+	}
+	for i, ta := range sm.TrustedAuthorities {
+		if ta.FrameworkType == "" {
+			return fmt.Errorf("trustedAuthorities[%d].frameworkType is required", i)
+		}
+		if ta.Value == "" {
+			return fmt.Errorf("trustedAuthorities[%d].value is required", i)
+		}
+	}
 
+	// Marshal for JSON Schema validation — include id in the object for schema
+	// validation but the normative schema does not require it (readOnly).
 	data, err := json.Marshal(sm)
 	if err != nil {
 		return fmt.Errorf("marshaling schema for validation: %w", err)

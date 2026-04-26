@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -21,14 +22,16 @@ serialization using PKCS#11. Supports SoftHSM2 and YubiHSM2 backends.`,
 }
 
 var (
-	flagInput      string
-	flagPattern    string
-	flagPKCS11URI  string
-	flagKeyLabel   string
-	flagIssuer     string
-	flagJKU        string
-	flagJWKSOutput string
-	flagAggregate  string
+	flagInput        string
+	flagPattern      string
+	flagPKCS11URI    string
+	flagKeyLabel     string
+	flagIssuer       string
+	flagJKU          string
+	flagJWKSOutput   string
+	flagAggregate    string
+	flagPreviousJWKS string
+	flagKeyRetention time.Duration
 )
 
 func init() {
@@ -40,6 +43,8 @@ func init() {
 	signCmd.Flags().StringVar(&flagJKU, "jku", "", "JWS Key URL (jku header)")
 	signCmd.Flags().StringVar(&flagJWKSOutput, "jwks-output", "", "Path to write JWKS public key file")
 	signCmd.Flags().StringVar(&flagAggregate, "aggregate", "", "Path to write aggregate JWS (for schemas list)")
+	signCmd.Flags().StringVar(&flagPreviousJWKS, "previous-jwks", "", "Path to previous JWKS file for key rotation (keys are retained for --key-retention)")
+	signCmd.Flags().DurationVar(&flagKeyRetention, "key-retention", 30*24*time.Hour, "Duration to retain previous signing keys in JWKS after rotation")
 
 	_ = signCmd.MarkFlagRequired("input")
 	_ = signCmd.MarkFlagRequired("pkcs11-uri")
@@ -70,6 +75,26 @@ func runSign(cmd *cobra.Command, args []string) error {
 		logger.Info("signed individual schemas", "count", len(signed))
 	}
 
+	// 2b. Sign attribute files
+	attrsDir := filepath.Join(flagInput, "attributes")
+	if _, err := os.Stat(attrsDir); err == nil {
+		signed, err := signer.SignDirectory(attrsDir, flagPattern)
+		if err != nil {
+			return fmt.Errorf("signing attributes: %w", err)
+		}
+		logger.Info("signed individual attributes", "count", len(signed))
+
+		// Sign attribute schemas too
+		attrSchemasDir := filepath.Join(attrsDir, "schemas")
+		if _, err := os.Stat(attrSchemasDir); err == nil {
+			signedSchemas, err := signer.SignDirectory(attrSchemasDir, flagPattern)
+			if err != nil {
+				return fmt.Errorf("signing attribute schemas: %w", err)
+			}
+			logger.Info("signed attribute schemas", "count", len(signedSchemas))
+		}
+	}
+
 	// 3. Sign aggregate (schemas list)
 	aggregatePath := flagAggregate
 	if aggregatePath == "" {
@@ -80,24 +105,46 @@ func runSign(cmd *cobra.Command, args []string) error {
 	}
 	logger.Info("signed aggregate schema list", "output", aggregatePath)
 
-	// 4. Write JWKS
+	// 4. Write JWKS (with key rotation support)
 	jwksPath := flagJWKSOutput
 	if jwksPath == "" {
 		jwksPath = filepath.Join(flagInput, ".well-known", "jwks.json")
 	}
-	if err := writeJWKS(signer, jwksPath); err != nil {
+
+	currentJWKS := signer.JWKS()
+
+	// If --previous-jwks is set, merge old keys for rotation overlap
+	var outputJWKS jwssign.TimestampedJWKS
+	if flagPreviousJWKS != "" {
+		previousJWKS, loadErr := jwssign.LoadTimestampedJWKS(flagPreviousJWKS)
+		if loadErr != nil {
+			logger.Warn("could not load previous JWKS, starting fresh", "error", loadErr)
+			outputJWKS = jwssign.MergeJWKS(currentJWKS, jwssign.TimestampedJWKS{KeyAdded: make(map[string]int64)}, flagKeyRetention)
+		} else {
+			before := len(previousJWKS.Keys)
+			outputJWKS = jwssign.MergeJWKS(currentJWKS, previousJWKS, flagKeyRetention)
+			retained := len(outputJWKS.Keys) - len(currentJWKS.Keys)
+			if retained > 0 {
+				logger.Info("key rotation: retained previous keys", "previous", before, "retained", retained, "retention", flagKeyRetention)
+			}
+		}
+	} else {
+		// No previous JWKS — just wrap current key with timestamp
+		outputJWKS = jwssign.MergeJWKS(currentJWKS, jwssign.TimestampedJWKS{KeyAdded: make(map[string]int64)}, flagKeyRetention)
+	}
+
+	if err := writeJWKS(outputJWKS, jwksPath); err != nil {
 		return fmt.Errorf("writing JWKS: %w", err)
 	}
-	logger.Info("wrote JWKS", "output", jwksPath)
+	logger.Info("wrote JWKS", "output", jwksPath, "keys", len(outputJWKS.Keys))
 
 	return nil
 }
 
-func writeJWKS(signer *jwssign.Signer, path string) error {
+func writeJWKS(jwks jwssign.TimestampedJWKS, path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	jwks := signer.JWKS()
 	data, err := json.MarshalIndent(jwks, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshaling JWKS: %w", err)

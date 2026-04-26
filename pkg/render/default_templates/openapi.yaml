@@ -1,11 +1,13 @@
 openapi: '3.1.0'
 info:
-  title: TS11 Catalogue of Attestations API
+  title: Catalogue of Attestations API
   description: |
-    Read-only TS11-compliant API for the Catalogue of Attestations.
-    All responses are JWS compact serialization (RFC 7515).
+    TS11-compliant API for the Catalogue of Attestations, implementing
+    the read-only subset of ETSI TS11 Section 5.
+    GET responses are JWS compact serialization (RFC 7515) when signing
+    is configured, or plain JSON otherwise.
     Write operations are handled via git-based workflow.
-  version: '1.0.0'
+  version: 'v1'
   contact:
     name: SIROS Foundation
     url: https://siros.org
@@ -15,46 +17,143 @@ servers:
       baseUrl:
         default: https://registry.siros.org
 paths:
-  /schemas.jwt:
+  /schemas:
     get:
       operationId: listSchemas
-      summary: List all attestation schemas
-      description: Returns a JWS compact serialization containing all SchemaMeta objects.
+      summary: List attestation schemas
+      description: |
+        Retrieves a paginated list of attestation schemas as a JWS-signed
+        object, with options to filter by various properties.
+      tags:
+        - Schemas
+      parameters:
+        - name: id
+          in: query
+          description: Filter by the unique identifier of the attestation schema.
+          schema:
+            type: string
+            format: uuid
+        - name: supportedFormats
+          in: query
+          description: Filter schemas by one or more supported formats.
+          schema:
+            type: array
+            items:
+              type: string
+              enum: [dc+sd-jwt, mso_mdoc, jwt_vc_json, jwt_vc_json-ld, ldp_vc]
+          style: form
+          explode: false
+        - name: attestationLoS
+          in: query
+          description: Filter schemas by the level of security.
+          schema:
+            type: string
+            enum: [iso_18045_high, iso_18045_moderate, iso_18045_enhanced-basic, iso_18045_basic]
+        - name: bindingType
+          in: query
+          description: Filter schemas by the cryptographic key binding type.
+          schema:
+            type: string
+            enum: [claim, key, biometric, none]
+        - name: trustedAuthoritiesFrameworkType
+          in: query
+          description: Filter by the framework type of the trusted authority.
+          schema:
+            type: string
+            enum: [aki, etsi_tl, openid_federation]
+        - name: trustedAuthoritiesValue
+          in: query
+          description: Filter by the URI or base64url of the trusted authority.
+          schema:
+            type: string
+        - name: schemaUri
+          in: query
+          description: Filter attestation schemas that contain a specific schema URI.
+          schema:
+            type: string
+            format: uri
+        - name: rulebookUri
+          in: query
+          description: Filter by the exact rulebook URI.
+          schema:
+            type: string
+            format: uri
+        - name: limit
+          in: query
+          description: The number of items to return.
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          description: The number of items to skip for pagination.
+          schema:
+            type: integer
+            default: 0
       responses:
         '200':
-          description: JWS-signed list of all attestation schemas
-          content:
-            application/jose:
+          description: A JWS-signed object containing the paginated list of attestation schemas.
+          headers:
+            x-jku-url:
+              description: URL pointing to the JSON Web Key Set (JWKS) used to verify the signature.
               schema:
                 type: string
-                description: JWS compact serialization
-  /schemas/{schemaId}.jwt:
+                format: uri
+          content:
+            application/jwt:
+              schema:
+                type: string
+                format: JWS
+                description: |
+                  A JWS-signed JWT in compact serialisation format.
+                  The JWT payload, once decoded and verified, conforms to the
+                  'SignedSchemaListPayload' schema.
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSchemaList'
+        '400':
+          description: Invalid query parameters.
+  /schemas/{schemaId}:
     get:
       operationId: getSchema
       summary: Get a single attestation schema
-      description: Returns a JWS compact serialization containing a single SchemaMeta object.
+      description: Returns a single SchemaMeta object by its unique identifier.
+      tags:
+        - Schemas
       parameters:
         - name: schemaId
           in: path
           required: true
+          description: The unique identifier of the attestation schema.
           schema:
             type: string
             format: uuid
       responses:
         '200':
-          description: JWS-signed SchemaMeta object
-          content:
-            application/jose:
+          description: JWS-signed or plain JSON SchemaMeta object.
+          headers:
+            x-jku-url:
+              description: URL pointing to the JSON Web Key Set (JWKS) used to verify the signature.
               schema:
                 type: string
-                description: JWS compact serialization
+                format: uri
+          content:
+            application/jwt:
+              schema:
+                type: string
+                format: JWS
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaMeta'
         '404':
-          description: Schema not found
+          description: Attestation schema with the specified ID not found.
   /.well-known/jwks.json:
     get:
       operationId: getJWKS
       summary: Get the JSON Web Key Set
       description: Returns the JWKS containing the public key(s) for verifying JWS signatures.
+      tags:
+        - Schemas
       responses:
         '200':
           description: JWKS
@@ -74,6 +173,8 @@ paths:
       description: |
         Returns all registered credentials including both TS11-compliant
         and non-TS11 legacy VCTM-only entries. Unsigned JSON.
+      tags:
+        - Legacy
       responses:
         '200':
           description: All registered credentials
@@ -86,6 +187,8 @@ paths:
       operationId: getOpenAPISpec
       summary: Get the OpenAPI specification
       description: Returns this OpenAPI 3.1.0 specification document.
+      tags:
+        - Schemas
       responses:
         '200':
           description: OpenAPI specification
@@ -96,10 +199,12 @@ paths:
 components:
   schemas:
     SchemaMeta:
+      title: SchemaMeta
+      description: A common attestation schema data model per TS11.
       type: object
       required:
-        - id
         - version
+        - rulebookURI
         - attestationLoS
         - bindingType
         - supportedFormats
@@ -108,26 +213,37 @@ components:
         id:
           type: string
           format: uuid
+          readOnly: true
         version:
           type: string
-        attestationLoS:
-          type: string
-        bindingType:
-          type: string
-        supportedFormats:
-          type: array
-          items:
-            type: string
-        schemaURIs:
-          type: array
-          items:
-            $ref: '#/components/schemas/SchemaURI'
         rulebookURI:
           type: string
           format: uri
         trustedAuthorities:
           type: array
-    SchemaURI:
+          items:
+            $ref: '#/components/schemas/TrustAuthority'
+        attestationLoS:
+          type: string
+          enum: [iso_18045_high, iso_18045_moderate, iso_18045_enhanced-basic, iso_18045_basic]
+        bindingType:
+          type: string
+          enum: [claim, key, biometric, none]
+        supportedFormats:
+          type: array
+          items:
+            type: string
+            enum: [dc+sd-jwt, mso_mdoc, jwt_vc_json, jwt_vc_json-ld, ldp_vc]
+          minItems: 1
+        schemaURIs:
+          type: array
+          items:
+            $ref: '#/components/schemas/Schema'
+          minItems: 1
+      additionalProperties: false
+    Schema:
+      title: Schema
+      description: Defines a format-specific schema URI.
       type: object
       required:
         - formatIdentifier
@@ -135,29 +251,51 @@ components:
       properties:
         formatIdentifier:
           type: string
+          enum: [dc+sd-jwt, mso_mdoc, jwt_vc_json, jwt_vc_json-ld, ldp_vc]
         uri:
           type: string
           format: uri
+      additionalProperties: false
+    TrustAuthority:
+      title: TrustAuthority
+      description: Applicable trust model/framework type and identifier.
+      type: object
+      required:
+        - frameworkType
+        - value
+      properties:
+        frameworkType:
+          type: string
+          enum: [aki, etsi_tl, openid_federation]
+        value:
+          type: string
+        isLOTE:
+          type: boolean
+      additionalProperties: false
     SignedSchemaListPayload:
       type: object
       properties:
         iss:
           type: string
+          format: uri
         iat:
           type: integer
         data:
-          type: object
-          properties:
-            total:
-              type: integer
-            limit:
-              type: integer
-            offset:
-              type: integer
-            data:
-              type: array
-              items:
-                $ref: '#/components/schemas/SchemaMeta'
+          $ref: '#/components/schemas/PaginatedSchemaList'
+      required: [iss, iat, data]
+    PaginatedSchemaList:
+      type: object
+      properties:
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SchemaMeta'
     LegacyRegistryPayload:
       type: object
       properties:
