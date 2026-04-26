@@ -88,6 +88,34 @@ func TestRenderCredential(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "test-uuid")
 	assert.Contains(t, string(content), "iso_18045_high")
+	// API endpoint link should not appear when TS11Compliant is false
+	assert.NotContains(t, string(content), "GET /schemas/test-uuid")
+}
+
+func TestRenderCredential_TS11APIEndpoint(t *testing.T) {
+	r, err := NewRenderer("")
+	require.NoError(t, err)
+
+	outDir := t.TempDir()
+	data := CredentialData{
+		Org:           "testorg",
+		Slug:          "test_cred",
+		TS11Compliant: true,
+		Schema: &schemameta.SchemaMeta{
+			ID:               "test-uuid",
+			Version:          "1.0.0",
+			AttestationLoS:   "iso_18045_high",
+			BindingType:      "key",
+			SupportedFormats: []string{"dc+sd-jwt"},
+		},
+	}
+
+	err = r.RenderCredential(outDir, data)
+	require.NoError(t, err)
+
+	content, err := os.ReadFile(filepath.Join(outDir, "testorg", "test_cred", "index.html"))
+	require.NoError(t, err)
+	assert.Contains(t, string(content), "GET /schemas/test-uuid")
 }
 
 func TestRenderRulebook(t *testing.T) {
