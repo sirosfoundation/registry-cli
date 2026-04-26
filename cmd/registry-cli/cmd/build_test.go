@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/sirosfoundation/registry-cli/pkg/render"
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
 )
 
@@ -306,4 +307,107 @@ func TestCopyFormatFiles(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join(outDir, "testorg", "cred.vctm.json"))
 	require.NoError(t, err)
 	assert.Equal(t, `{"test":true}`, string(data))
+}
+
+func TestWriteVCTMRegistryJSON(t *testing.T) {
+	dir := t.TempDir()
+	baseURL := "https://registry.siros.org"
+
+	credentials := []render.CredentialData{
+		{
+			Org:  "sirosfoundation",
+			Slug: "test-cred",
+			Schema: &schemameta.SchemaMeta{
+				ID:      "test-id-1",
+				Version: "1.0.0",
+			},
+			VCTM: &render.VCTMData{
+				VCT:         "https://example.com/types/test-cred",
+				Name:        "Test Credential",
+				Description: "A test credential for unit tests",
+			},
+			AvailableFormats: []render.FormatInfo{
+				{Name: "SD-JWT", Label: "SD-JWT VC Type Metadata", File: "/sirosfoundation/test-cred.vctm.json"},
+				{Name: "mDOC", Label: "mso_mdoc", File: "/sirosfoundation/test-cred.mdoc.json"},
+			},
+			SourceURL:  "https://github.com/sirosfoundation/demo-credentials",
+			SourceRepo: "demo-credentials",
+		},
+		{
+			Org:  "SUNET",
+			Slug: "legacy-cred",
+			Schema: &schemameta.SchemaMeta{
+				ID:      "legacy-id",
+				Version: "0.1.0",
+				SchemaURIs: []schemameta.SchemaURI{
+					{FormatIdentifier: "dc+sd-jwt", URI: baseURL + "/SUNET/legacy-cred.vctm"},
+				},
+			},
+			// No VCTM data — legacy credential without parsed VCTM
+		},
+	}
+
+	err := writeVCTMRegistryJSON(dir, baseURL, credentials)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".well-known", "vctm-registry.json"))
+	require.NoError(t, err)
+
+	var index map[string]any
+	require.NoError(t, json.Unmarshal(data, &index))
+
+	// Check top-level fields
+	assert.Equal(t, "SIROS Credential Registry", index["name"])
+	assert.Equal(t, "2.0", index["version"])
+	assert.Equal(t, baseURL, index["url"])
+	assert.NotEmpty(t, index["buildTime"])
+
+	// Check credentials array
+	creds := index["credentials"].([]any)
+	require.Len(t, creds, 2)
+
+	// First credential: has VCTM data and available formats
+	c1 := creds[0].(map[string]any)
+	assert.Equal(t, "https://example.com/types/test-cred", c1["vct"])
+	assert.Equal(t, "Test Credential", c1["name"])
+	assert.Equal(t, "A test credential for unit tests", c1["description"])
+	assert.Equal(t, "sirosfoundation", c1["organization"])
+
+	formats1 := c1["formats"].(map[string]any)
+	vctmFmt := formats1["vctm"].(map[string]any)
+	assert.Equal(t, baseURL+"/sirosfoundation/test-cred.vctm.json", vctmFmt["url"])
+	mdocFmt := formats1["mdoc"].(map[string]any)
+	assert.Equal(t, baseURL+"/sirosfoundation/test-cred.mdoc.json", mdocFmt["url"])
+
+	meta1 := c1["metadata"].(map[string]any)
+	assert.Equal(t, baseURL+"/sirosfoundation/test-cred.html", meta1["html"])
+	assert.Equal(t, baseURL+"/sirosfoundation/test-cred.vctm.json", meta1["json"])
+
+	source1 := c1["source"].(map[string]any)
+	assert.Equal(t, "https://github.com/sirosfoundation/demo-credentials", source1["repository"])
+
+	// Second credential: no VCTM, falls back to schema ID and schema URIs
+	c2 := creds[1].(map[string]any)
+	assert.Equal(t, "legacy-id", c2["vct"])
+	assert.Equal(t, "legacy-cred", c2["name"])
+
+	formats2 := c2["formats"].(map[string]any)
+	vctmFmt2 := formats2["vctm"].(map[string]any)
+	assert.Equal(t, baseURL+"/SUNET/legacy-cred.vctm", vctmFmt2["url"])
+}
+
+func TestWriteVCTMRegistryJSON_EmptyCredentials(t *testing.T) {
+	dir := t.TempDir()
+
+	err := writeVCTMRegistryJSON(dir, "https://example.com", nil)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".well-known", "vctm-registry.json"))
+	require.NoError(t, err)
+
+	var index map[string]any
+	require.NoError(t, json.Unmarshal(data, &index))
+	// credentials should be null/empty but the file should still be valid JSON
+	assert.NotNil(t, index["name"])
+	assert.Equal(t, "2.0", index["version"])
 }

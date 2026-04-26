@@ -119,6 +119,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("building credential data: %w", err)
 	}
 
+	// 6b. Write .well-known/vctm-registry.json (backward-compatible legacy format)
+	if writeErr := writeVCTMRegistryJSON(flagOutput, flagBaseURL, credentials); writeErr != nil {
+		return fmt.Errorf("writing vctm-registry.json: %w", writeErr)
+	}
+
 	renderer, err := render.NewRenderer(flagTemplates)
 	if err != nil {
 		return fmt.Errorf("creating renderer: %w", err)
@@ -423,6 +428,152 @@ func writeLegacyOutput(outputDir string, schemas []*schemameta.SchemaMeta) error
 		return fmt.Errorf("marshaling legacy registry: %w", err)
 	}
 	return os.WriteFile(filepath.Join(apiDir, "registry.json"), data, 0o644)
+}
+
+// writeVCTMRegistryJSON writes .well-known/vctm-registry.json in the exact format
+// expected by go-wallet-backend's registry fetcher. This includes ALL credentials
+// (both TS11 and non-TS11) for backward compatibility.
+func writeVCTMRegistryJSON(outputDir, baseURL string, credentials []render.CredentialData) error {
+	type credFormat struct {
+		URL  string `json:"url"`
+		Type string `json:"type"`
+	}
+	type credMetadata struct {
+		HTML string `json:"html,omitempty"`
+		JSON string `json:"json,omitempty"`
+	}
+	type credSource struct {
+		Repository string `json:"repository,omitempty"`
+		Branch     string `json:"branch,omitempty"`
+	}
+	type registryCredential struct {
+		VCT          string                `json:"vct"`
+		Name         string                `json:"name"`
+		Description  string                `json:"description,omitempty"`
+		Organization string                `json:"organization,omitempty"`
+		Formats      map[string]credFormat `json:"formats"`
+		Metadata     credMetadata          `json:"metadata,omitempty"`
+		Source       *credSource           `json:"source,omitempty"`
+	}
+	type registryIndex struct {
+		Schema      string               `json:"$schema"`
+		Name        string               `json:"name"`
+		Description string               `json:"description"`
+		URL         string               `json:"url"`
+		Version     string               `json:"version"`
+		Credentials []registryCredential `json:"credentials"`
+		BuildTime   string               `json:"buildTime"`
+	}
+
+	var creds []registryCredential
+	for _, c := range credentials {
+		// Derive VCT: prefer VCTM.VCT field, fall back to schema ID
+		vct := ""
+		if c.VCTM != nil && c.VCTM.VCT != "" {
+			vct = c.VCTM.VCT
+		} else if c.Schema != nil {
+			vct = c.Schema.ID
+		}
+		if vct == "" {
+			continue
+		}
+
+		// Derive name: prefer VCTM name, then slug
+		name := c.Slug
+		if c.VCTM != nil && c.VCTM.Name != "" {
+			name = c.VCTM.Name
+		}
+
+		// Derive description from VCTM
+		description := ""
+		if c.VCTM != nil {
+			description = c.VCTM.Description
+		}
+
+		// Build formats map from available format files
+		formats := make(map[string]credFormat)
+		for _, f := range c.AvailableFormats {
+			var key string
+			switch f.Name {
+			case "SD-JWT":
+				key = "vctm"
+			case "mDOC":
+				key = "mdoc"
+			case "W3C VC":
+				key = "vc"
+			default:
+				continue
+			}
+			formats[key] = credFormat{
+				URL:  baseURL + f.File,
+				Type: "application/json",
+			}
+		}
+
+		// If no formats found but we have schema URIs, build from those
+		if len(formats) == 0 && c.Schema != nil {
+			for _, su := range c.Schema.SchemaURIs {
+				var key string
+				switch su.FormatIdentifier {
+				case "dc+sd-jwt":
+					key = "vctm"
+				case "mso_mdoc":
+					key = "mdoc"
+				case "jwt_vc_json":
+					key = "vc"
+				default:
+					continue
+				}
+				formats[key] = credFormat{
+					URL:  su.URI,
+					Type: "application/json",
+				}
+			}
+		}
+
+		basePath := "/" + c.Org + "/" + c.Slug
+
+		cred := registryCredential{
+			VCT:          vct,
+			Name:         name,
+			Description:  description,
+			Organization: c.Org,
+			Formats:      formats,
+			Metadata: credMetadata{
+				HTML: baseURL + basePath + ".html",
+				JSON: baseURL + basePath + ".vctm.json",
+			},
+		}
+
+		if c.SourceURL != "" {
+			cred.Source = &credSource{
+				Repository: c.SourceURL,
+				Branch:     "main",
+			}
+		}
+
+		creds = append(creds, cred)
+	}
+
+	index := registryIndex{
+		Schema:      "https://registry.siros.org/schemas/vctm-registry.json",
+		Name:        "SIROS Credential Registry",
+		Description: "A public registry of credential metadata for SD-JWT VC, mDOC, and W3C VC ecosystems",
+		URL:         baseURL,
+		Version:     "2.0",
+		Credentials: creds,
+		BuildTime:   time.Now().UTC().Format(time.RFC3339),
+	}
+
+	wellKnownDir := filepath.Join(outputDir, ".well-known")
+	if err := os.MkdirAll(wellKnownDir, 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(index, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling vctm-registry.json: %w", err)
+	}
+	return os.WriteFile(filepath.Join(wellKnownDir, "vctm-registry.json"), data, 0o644)
 }
 
 func extractOrg(cloneURL string) string {
