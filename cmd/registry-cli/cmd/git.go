@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 )
@@ -15,4 +16,18 @@ func execGit(args ...string) error {
 		return fmt.Errorf("git %v: %w", args, err)
 	}
 	return nil
+}
+
+// injectToken injects a token into an HTTPS git URL for authentication.
+// For non-HTTPS URLs or empty tokens, the URL is returned unchanged.
+func injectToken(cloneURL, token string) string {
+	if token == "" {
+		return cloneURL
+	}
+	u, err := url.Parse(cloneURL)
+	if err != nil || u.Scheme != "https" {
+		return cloneURL
+	}
+	u.User = url.UserPassword("x-access-token", token)
+	return u.String()
 }

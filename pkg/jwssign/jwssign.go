@@ -1,12 +1,13 @@
-// Package jwssign implements JWS compact serialization signing via PKCS#11.
-// It supports SoftHSM2 and YubiHSM2 backends for the 3-tier signing model
-// (dev/softhsm/yubihsm).
+// Package jwssign implements JWS compact serialization signing.
+// It supports PKCS#11 backends (SoftHSM2, YubiHSM2) for production use,
+// and ephemeral in-memory keys for development and CI.
 package jwssign
 
 import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/rsa"
 	"encoding/hex"
 	"encoding/json"
@@ -22,8 +23,8 @@ import (
 
 // Signer signs JSON payloads as JWS compact serialization.
 type Signer struct {
-	ctx    *crypto11.Context
-	key    crypto11.Signer
+	ctx    *crypto11.Context // nil for ephemeral signers
+	key    crypto.Signer
 	alg    jose.SignatureAlgorithm
 	issuer string
 	jku    string
@@ -152,6 +153,25 @@ func NewSignerFromConfig(pkcs11URI, keyLabel, issuer, jku string) (*Signer, erro
 	})
 }
 
+// NewEphemeralSigner creates a signer backed by an in-memory ECDSA P-256 key.
+// This is suitable for development, CI, and deployments without HSM access.
+// The key exists only for the lifetime of the process.
+func NewEphemeralSigner(issuer, jku string) (*Signer, error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, fmt.Errorf("generating ephemeral key: %w", err)
+	}
+
+	return &Signer{
+		ctx:    nil,
+		key:    key,
+		alg:    jose.ES256,
+		issuer: issuer,
+		jku:    jku,
+		keyID:  "ephemeral",
+	}, nil
+}
+
 // Close releases the PKCS#11 context.
 func (s *Signer) Close() error {
 	if s.ctx != nil {
@@ -178,8 +198,17 @@ func (s *Signer) Sign(payload json.RawMessage) (string, error) {
 		opts.WithHeader("jku", s.jku)
 	}
 
+	// Use OpaqueSigner for PKCS#11 keys (go-jose's type switch doesn't handle
+	// crypto.Signer directly), or the native key for ephemeral signers.
+	var signingKey any
+	if s.ctx != nil {
+		signingKey = &pkcs11CryptoSigner{s.key}
+	} else {
+		signingKey = s.key
+	}
+
 	joseSigner, err := jose.NewSigner(
-		jose.SigningKey{Algorithm: s.alg, Key: &pkcs11CryptoSigner{s.key}},
+		jose.SigningKey{Algorithm: s.alg, Key: signingKey},
 		opts,
 	)
 	if err != nil {
@@ -364,7 +393,7 @@ func (s *Signer) SignAggregate(dir, pattern, outputPath string) error {
 // go-jose's type switch only checks for *ecdsa.PrivateKey, *rsa.PrivateKey, etc.
 // but not crypto.Signer directly. This wrapper implements jose.OpaqueSigner.
 type pkcs11CryptoSigner struct {
-	signer crypto11.Signer
+	signer crypto.Signer
 }
 
 func (s *pkcs11CryptoSigner) Public() *jose.JSONWebKey {

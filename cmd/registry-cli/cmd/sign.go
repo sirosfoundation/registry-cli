@@ -15,9 +15,10 @@ import (
 
 var signCmd = &cobra.Command{
 	Use:   "sign",
-	Short: "Sign JSON API payloads as JWS via PKCS#11",
+	Short: "Sign JSON API payloads as JWS",
 	Long: `Sign unsigned JSON files produced by 'registry-cli build' as JWS compact
-serialization using PKCS#11. Supports SoftHSM2 and YubiHSM2 backends.`,
+serialization. Uses PKCS#11 when --pkcs11-uri is provided, otherwise generates
+an ephemeral in-memory key (suitable for development and CI).`,
 	RunE: runSign,
 }
 
@@ -47,8 +48,6 @@ func init() {
 	signCmd.Flags().DurationVar(&flagKeyRetention, "key-retention", 30*24*time.Hour, "Duration to retain previous signing keys in JWKS after rotation")
 
 	_ = signCmd.MarkFlagRequired("input")
-	_ = signCmd.MarkFlagRequired("pkcs11-uri")
-	_ = signCmd.MarkFlagRequired("issuer")
 
 	rootCmd.AddCommand(signCmd)
 }
@@ -56,14 +55,27 @@ func init() {
 func runSign(cmd *cobra.Command, args []string) error {
 	logger := slog.Default()
 
-	// 1. Initialize PKCS#11 signer
-	signer, err := jwssign.NewSignerFromConfig(flagPKCS11URI, flagKeyLabel, flagIssuer, flagJKU)
-	if err != nil {
-		return fmt.Errorf("initializing signer: %w", err)
+	// 1. Initialize signer: PKCS#11 if configured, otherwise ephemeral
+	var signer *jwssign.Signer
+	var err error
+
+	if flagPKCS11URI != "" {
+		signer, err = jwssign.NewSignerFromConfig(flagPKCS11URI, flagKeyLabel, flagIssuer, flagJKU)
+		if err != nil {
+			return fmt.Errorf("initializing PKCS#11 signer: %w", err)
+		}
+		logger.Info("initialized PKCS#11 signer", "key-label", flagKeyLabel, "issuer", flagIssuer)
+	} else {
+		if flagIssuer == "" {
+			flagIssuer = "registry-cli"
+		}
+		signer, err = jwssign.NewEphemeralSigner(flagIssuer, flagJKU)
+		if err != nil {
+			return fmt.Errorf("initializing ephemeral signer: %w", err)
+		}
+		logger.Info("initialized ephemeral signer (no PKCS#11 configured)", "issuer", flagIssuer)
 	}
 	defer signer.Close()
-
-	logger.Info("initialized PKCS#11 signer", "key-label", flagKeyLabel, "issuer", flagIssuer)
 
 	// 2. Sign individual files
 	schemasDir := filepath.Join(flagInput, "schemas")

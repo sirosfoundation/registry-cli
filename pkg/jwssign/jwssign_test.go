@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,4 +238,155 @@ func TestLoadTimestampedJWKS_InvalidJSON(t *testing.T) {
 
 	_, err := LoadTimestampedJWKS(path)
 	assert.Error(t, err)
+}
+
+func TestNewEphemeralSigner(t *testing.T) {
+	signer, err := NewEphemeralSigner("test-issuer", "https://example.com/jwks.json")
+	require.NoError(t, err)
+	require.NotNil(t, signer)
+	defer signer.Close()
+
+	assert.Equal(t, "ephemeral", signer.keyID)
+	assert.Equal(t, jose.ES256, signer.alg)
+}
+
+func TestEphemeralSigner_Sign(t *testing.T) {
+	signer, err := NewEphemeralSigner("test-issuer", "")
+	require.NoError(t, err)
+	defer signer.Close()
+
+	payload := json.RawMessage(`{"name":"test credential"}`)
+	compact, err := signer.Sign(payload)
+	require.NoError(t, err)
+
+	// JWS compact has 3 parts
+	parts := strings.Split(compact, ".")
+	assert.Len(t, parts, 3, "JWS compact serialization should have 3 parts")
+
+	// Verify the signature using the public key
+	jwk := signer.PublicJWK()
+	parsed, err := jose.ParseSigned(compact, []jose.SignatureAlgorithm{jose.ES256})
+	require.NoError(t, err)
+
+	verified, err := parsed.Verify(jwk.Key)
+	require.NoError(t, err)
+
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(verified, &envelope))
+	assert.Equal(t, "test-issuer", envelope["iss"])
+	assert.NotNil(t, envelope["iat"])
+	assert.NotNil(t, envelope["data"])
+}
+
+func TestEphemeralSigner_SignWithJKU(t *testing.T) {
+	signer, err := NewEphemeralSigner("issuer", "https://example.com/jwks.json")
+	require.NoError(t, err)
+	defer signer.Close()
+
+	compact, err := signer.Sign(json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	parsed, err := jose.ParseSigned(compact, []jose.SignatureAlgorithm{jose.ES256})
+	require.NoError(t, err)
+
+	// Check jku header
+	assert.Equal(t, "https://example.com/jwks.json", parsed.Signatures[0].Protected.ExtraHeaders["jku"])
+}
+
+func TestEphemeralSigner_PublicJWK(t *testing.T) {
+	signer, err := NewEphemeralSigner("issuer", "")
+	require.NoError(t, err)
+	defer signer.Close()
+
+	jwk := signer.PublicJWK()
+	assert.Equal(t, "ephemeral", jwk.KeyID)
+	assert.Equal(t, "ES256", jwk.Algorithm)
+	assert.Equal(t, "sig", jwk.Use)
+	assert.IsType(t, &ecdsa.PublicKey{}, jwk.Key)
+}
+
+func TestEphemeralSigner_JWKS(t *testing.T) {
+	signer, err := NewEphemeralSigner("issuer", "")
+	require.NoError(t, err)
+	defer signer.Close()
+
+	jwks := signer.JWKS()
+	assert.Len(t, jwks.Keys, 1)
+	assert.Equal(t, "ephemeral", jwks.Keys[0].KeyID)
+}
+
+func TestEphemeralSigner_SignFile(t *testing.T) {
+	signer, err := NewEphemeralSigner("issuer", "")
+	require.NoError(t, err)
+	defer signer.Close()
+
+	dir := t.TempDir()
+	jsonPath := filepath.Join(dir, "test.json")
+	require.NoError(t, os.WriteFile(jsonPath, []byte(`{"hello":"world"}`), 0o644))
+
+	jwtPath, err := signer.SignFile(jsonPath)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "test.jwt"), jwtPath)
+
+	// Verify the JWT file was created and is valid
+	data, err := os.ReadFile(jwtPath)
+	require.NoError(t, err)
+
+	parsed, err := jose.ParseSigned(string(data), []jose.SignatureAlgorithm{jose.ES256})
+	require.NoError(t, err)
+
+	_, err = parsed.Verify(signer.PublicJWK().Key)
+	require.NoError(t, err)
+}
+
+func TestEphemeralSigner_SignDirectory(t *testing.T) {
+	signer, err := NewEphemeralSigner("issuer", "")
+	require.NoError(t, err)
+	defer signer.Close()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.json"), []byte(`{"a":1}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.json"), []byte(`{"b":2}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "skip.txt"), []byte("not json"), 0o644))
+
+	signed, err := signer.SignDirectory(dir, "*.json")
+	require.NoError(t, err)
+	assert.Len(t, signed, 2)
+}
+
+func TestEphemeralSigner_SignAggregate(t *testing.T) {
+	signer, err := NewEphemeralSigner("issuer", "")
+	require.NoError(t, err)
+	defer signer.Close()
+
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "a.json"), []byte(`{"a":1}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "b.json"), []byte(`{"b":2}`), 0o644))
+
+	outPath := filepath.Join(dir, "aggregate.jwt")
+	err = signer.SignAggregate(dir, "*.json", outPath)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(outPath)
+	require.NoError(t, err)
+
+	parsed, err := jose.ParseSigned(string(data), []jose.SignatureAlgorithm{jose.ES256})
+	require.NoError(t, err)
+
+	verified, err := parsed.Verify(signer.PublicJWK().Key)
+	require.NoError(t, err)
+
+	var envelope map[string]any
+	require.NoError(t, json.Unmarshal(verified, &envelope))
+	assert.Equal(t, float64(2), envelope["data"].(map[string]any)["total"])
+}
+
+func TestEphemeralSigner_Close(t *testing.T) {
+	signer, err := NewEphemeralSigner("issuer", "")
+	require.NoError(t, err)
+
+	// Close should be safe (no-op, no PKCS#11 context)
+	assert.NoError(t, signer.Close())
+	// Double-close should also be safe
+	assert.NoError(t, signer.Close())
 }

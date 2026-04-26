@@ -72,9 +72,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = os.RemoveAll(workDir) }()
 
+	gitToken := os.Getenv("GITHUB_TOKEN")
+
 	var schemas []*schemameta.SchemaMeta
 	for _, repo := range repos {
-		repoSchemas, processErr := processRepo(repo, workDir, flagBaseURL, logger)
+		repoSchemas, processErr := processRepo(repo, workDir, flagBaseURL, gitToken, logger)
 		if processErr != nil {
 			logger.Warn("skipping repo", "url", repo.URL, "error", processErr)
 			continue
@@ -230,7 +232,7 @@ func buildResolvers() []discovery.Resolver {
 	return resolvers
 }
 
-func processRepo(repo discovery.ResolvedRepo, workDir, baseURL string, logger *slog.Logger) ([]*schemameta.SchemaMeta, error) {
+func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string, logger *slog.Logger) ([]*schemameta.SchemaMeta, error) {
 	// Determine org name: explicit label > URL inference
 	org := repo.Organization
 	if org == "" {
@@ -253,7 +255,7 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL string, logger *s
 	} else {
 		// Clone repo
 		repoDir = filepath.Join(workDir, org, extractRepoName(repo.URL))
-		if err := cloneRepo(repo.URL, repo.Branch, repoDir); err != nil {
+		if err := cloneRepo(repo.URL, repo.Branch, repoDir, gitToken); err != nil {
 			return nil, fmt.Errorf("cloning %s: %w", repo.URL, err)
 		}
 	}
@@ -446,8 +448,9 @@ func extractRepoName(cloneURL string) string {
 	return ""
 }
 
-func cloneRepo(url, branch, dest string) error {
-	return execGit("clone", "--depth", "1", "--branch", branch, "--", url, dest)
+func cloneRepo(repoURL, branch, dest, token string) error {
+	authURL := injectToken(repoURL, token)
+	return execGit("clone", "--depth", "1", "--branch", branch, "--", authURL, dest)
 }
 
 // buildCredentialData constructs render.CredentialData for each schema,
