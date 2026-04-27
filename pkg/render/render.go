@@ -236,7 +236,7 @@ func (r *Renderer) RenderExtraDocPages(outputDir string, data SiteData) error {
 	}
 	for _, t := range r.tmpl.Templates() {
 		name := t.Name()
-		if builtIn[name] || !strings.HasSuffix(name, ".html") {
+		if builtIn[name] || !strings.HasSuffix(name, ".html") || strings.HasPrefix(name, "_") {
 			continue
 		}
 		if err := r.renderToFile(filepath.Join(docsDir, name), name, data); err != nil {
