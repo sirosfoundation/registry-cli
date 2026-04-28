@@ -66,7 +66,8 @@ func (r *GitHubResolver) Resolve(source string) ([]ResolvedRepo, error) {
 		}
 		for _, repo := range result.Repositories {
 			repos = append(repos, ResolvedRepo{
-				URL: repo.GetCloneURL(),
+				URL:    repo.GetCloneURL(),
+				Branch: repo.GetDefaultBranch(),
 			})
 		}
 		if resp.NextPage == 0 {

@@ -73,7 +73,7 @@ func TestLoadManifest_DefaultBranch(t *testing.T) {
 
 	m, err := LoadManifest(path)
 	require.NoError(t, err)
-	assert.Equal(t, "vctm", m.Defaults.Branch, "should default to 'vctm'")
+	assert.Equal(t, "", m.Defaults.Branch, "should default to empty (use repo default)")
 }
 
 func TestLoadManifest_Empty(t *testing.T) {
@@ -123,6 +123,17 @@ func TestResolveAll_ExplicitOnly(t *testing.T) {
 	}
 }
 
+func TestResolveAll_ExplicitNoBranch(t *testing.T) {
+	m := &SourceManifest{
+		Sources: []SourceEntry{{URL: "git:https://github.com/org/repo1.git"}},
+	}
+
+	repos, err := ResolveAll(m, nil)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(repos))
+	assert.Equal(t, "", repos[0].Branch, "explicit entry with no default branch should have empty branch")
+}
+
 func TestResolveAll_MetaSource(t *testing.T) {
 	m := &SourceManifest{
 		Sources:  []SourceEntry{{URL: "test:discover"}},
@@ -142,8 +153,29 @@ func TestResolveAll_MetaSource(t *testing.T) {
 	assert.Equal(t, 2, len(repos))
 	for _, r := range repos {
 		assert.Equal(t, "test:discover", r.Origin)
-		assert.Equal(t, "vctm", r.Branch)
+		assert.Equal(t, "vctm", r.Branch, "empty branch from resolver should be filled with default")
 	}
+}
+
+func TestResolveAll_MetaSourcePreservesResolverBranch(t *testing.T) {
+	m := &SourceManifest{
+		Sources:  []SourceEntry{{URL: "test:discover"}},
+		Defaults: SourceDefaults{Branch: "vctm"},
+	}
+
+	resolver := &mockResolver{
+		prefix: "test:",
+		repos: []ResolvedRepo{
+			{URL: "https://github.com/org/repo1.git", Branch: "main"},
+			{URL: "https://github.com/org/repo2.git", Branch: "develop"},
+		},
+	}
+
+	repos, err := ResolveAll(m, []Resolver{resolver})
+	require.NoError(t, err)
+	assert.Equal(t, 2, len(repos))
+	assert.Equal(t, "main", repos[0].Branch, "resolver-provided branch should not be overridden")
+	assert.Equal(t, "develop", repos[1].Branch, "resolver-provided branch should not be overridden")
 }
 
 func TestResolveAll_ExplicitTakesPrecedence(t *testing.T) {
@@ -253,6 +285,28 @@ func TestResolveAll_GitWithExplicitOrg(t *testing.T) {
 	assert.Equal(t, "OverrideOrg", repos[0].Organization)
 }
 
+func TestResolveAll_GitWithPerEntryBranch(t *testing.T) {
+	m := &SourceManifest{
+		Sources: []SourceEntry{
+			{URL: "git:https://github.com/org/repo1.git", Branch: "vctm"},
+			{URL: "git:https://github.com/org/repo2.git"},
+		},
+		Defaults: SourceDefaults{Branch: "main"},
+	}
+
+	repos, err := ResolveAll(m, nil)
+	require.NoError(t, err)
+	require.Equal(t, 2, len(repos))
+
+	for _, r := range repos {
+		if r.URL == "https://github.com/org/repo1.git" {
+			assert.Equal(t, "vctm", r.Branch, "per-entry branch overrides default")
+		} else {
+			assert.Equal(t, "main", r.Branch, "entry without branch uses default")
+		}
+	}
+}
+
 func TestResolveAll_MetaSourceWithExplicitOrg(t *testing.T) {
 	m := &SourceManifest{
 		Sources:  []SourceEntry{{URL: "test:discover", Organization: "MetaOrg"}},
@@ -277,10 +331,11 @@ func TestResolveAll_MetaSourceWithExplicitOrg(t *testing.T) {
 
 func TestSourceEntryUnmarshalYAML(t *testing.T) {
 	tests := []struct {
-		name    string
-		yaml    string
-		wantURL string
-		wantOrg string
+		name       string
+		yaml       string
+		wantURL    string
+		wantOrg    string
+		wantBranch string
 	}{
 		{
 			name:    "plain string",
@@ -300,6 +355,13 @@ func TestSourceEntryUnmarshalYAML(t *testing.T) {
 			wantURL: "git:https://example.com/repo.git",
 			wantOrg: "",
 		},
+		{
+			name:       "struct with branch",
+			yaml:       "url: git:https://example.com/repo.git\nbranch: vctm",
+			wantURL:    "git:https://example.com/repo.git",
+			wantOrg:    "",
+			wantBranch: "vctm",
+		},
 	}
 
 	for _, tt := range tests {
@@ -309,6 +371,7 @@ func TestSourceEntryUnmarshalYAML(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantURL, entry.URL)
 			assert.Equal(t, tt.wantOrg, entry.Organization)
+			assert.Equal(t, tt.wantBranch, entry.Branch)
 		})
 	}
 }

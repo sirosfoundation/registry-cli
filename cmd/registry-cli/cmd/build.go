@@ -601,7 +601,10 @@ func extractRepoName(cloneURL string) string {
 
 func cloneRepo(repoURL, branch, dest, token string) error {
 	authURL := injectToken(repoURL, token)
-	return execGit("clone", "--depth", "1", "--branch", branch, "--", authURL, dest)
+	if branch != "" {
+		return execGit("clone", "--depth", "1", "--branch", branch, "--", authURL, dest)
+	}
+	return execGit("clone", "--depth", "1", "--", authURL, dest)
 }
 
 // buildCredentialData constructs render.CredentialData for each schema,

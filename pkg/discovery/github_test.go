@@ -30,11 +30,13 @@ func TestGitHubResolver_Resolve(t *testing.T) {
 
 		url1 := "https://github.com/testorg/repo1.git"
 		url2 := "https://github.com/testorg/repo2.git"
+		branch1 := "main"
+		branch2 := "master"
 		result := github.RepositoriesSearchResult{
 			Total: github.Int(2),
 			Repositories: []*github.Repository{
-				{CloneURL: &url1},
-				{CloneURL: &url2},
+				{CloneURL: &url1, DefaultBranch: &branch1},
+				{CloneURL: &url2, DefaultBranch: &branch2},
 			},
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -51,7 +53,9 @@ func TestGitHubResolver_Resolve(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 2, len(repos))
 	assert.Equal(t, "https://github.com/testorg/repo1.git", repos[0].URL)
+	assert.Equal(t, "main", repos[0].Branch, "should use repo's default branch")
 	assert.Equal(t, "https://github.com/testorg/repo2.git", repos[1].URL)
+	assert.Equal(t, "master", repos[1].Branch, "should use repo's default branch")
 }
 
 func TestGitHubResolver_Resolve_EmptyTopic(t *testing.T) {

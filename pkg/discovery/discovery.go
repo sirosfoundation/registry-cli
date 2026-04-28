@@ -21,21 +21,23 @@ type SourceDefaults struct {
 }
 
 // SourceEntry represents a source in the manifest. It can be either a plain
-// string URI or a struct with an explicit organization label.
+// string URI or a struct with explicit organization and branch overrides.
 //
 // Plain string:
 //
 //	sources:
 //	  - "git:https://github.com/org/repo.git"
 //
-// Struct with organization:
+// Struct with organization and branch:
 //
 //	sources:
-//	  - url: "file:///path/to/local/dir"
+//	  - url: "git:https://github.com/org/repo.git"
 //	    organization: "MyOrg"
+//	    branch: "vctm"
 type SourceEntry struct {
 	URL          string `yaml:"url"`
 	Organization string `yaml:"organization,omitempty"`
+	Branch       string `yaml:"branch,omitempty"`
 }
 
 // UnmarshalYAML allows SourceEntry to be parsed from either a plain string
@@ -78,9 +80,6 @@ func LoadManifest(path string) (*SourceManifest, error) {
 	if len(m.Sources) == 0 {
 		return nil, fmt.Errorf("sources manifest has no sources")
 	}
-	if m.Defaults.Branch == "" {
-		m.Defaults.Branch = "vctm"
-	}
 	return &m, nil
 }
 
@@ -97,9 +96,13 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 
 		if strings.HasPrefix(source, "git:") {
 			url := strings.TrimPrefix(source, "git:")
+			branch := entry.Branch
+			if branch == "" {
+				branch = manifest.Defaults.Branch
+			}
 			explicit[url] = ResolvedRepo{
 				URL:          url,
-				Branch:       manifest.Defaults.Branch,
+				Branch:       branch,
 				Origin:       "explicit",
 				Organization: entry.Organization,
 			}
