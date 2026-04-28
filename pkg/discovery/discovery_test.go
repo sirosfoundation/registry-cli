@@ -94,6 +94,38 @@ func TestLoadManifest_NotFound(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestLoadManifest_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sources.yaml")
+
+	content := `sources:
+  - {invalid yaml [[[
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	_, err := LoadManifest(path)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing sources manifest")
+}
+
+func TestLoadManifest_WithPerEntryBranch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sources.yaml")
+
+	content := `sources:
+  - url: "git:https://github.com/org/repo.git"
+    branch: vctm
+  - "git:https://github.com/other/repo.git"
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	m, err := LoadManifest(path)
+	require.NoError(t, err)
+	assert.Equal(t, 2, len(m.Sources))
+	assert.Equal(t, "vctm", m.Sources[0].Branch)
+	assert.Equal(t, "", m.Sources[1].Branch)
+}
+
 // mockResolver is a test resolver that returns canned results.
 type mockResolver struct {
 	prefix string

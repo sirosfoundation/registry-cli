@@ -990,10 +990,13 @@ func TestTS11_5_3_1_FilterWithPagination(t *testing.T) {
 }
 
 func TestTS11_5_3_1_NoMatchReturnsEmptyList(t *testing.T) {
-	// TS11 §5.3.1 implies 200 with empty data when no matches
+	// TS11 §5.3.1 implies 200 with empty data when no matches.
+	// Use a valid combination where both filters are valid TS11 values
+	// but no schema in the catalogue satisfies both simultaneously.
+	// Schema with biometric binding has enhanced-basic LoS, not high.
 	mux := setupTS11(t)
 
-	w := doGET(t, mux, "/api/v1/schemas?bindingType=nonexistent")
+	w := doGET(t, mux, "/api/v1/schemas?bindingType=biometric&attestationLoS=iso_18045_high")
 	assert.Equal(t, http.StatusOK, w.Code, "should return 200 even with no matches")
 
 	result := parsePaginatedList(t, w)

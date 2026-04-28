@@ -400,3 +400,39 @@ func TestValidateRaw_Valid(t *testing.T) {
 	err = v.ValidateRaw(obj)
 	assert.NoError(t, err)
 }
+
+func TestNormalizeAttestationLoS_Invalid(t *testing.T) {
+	// Unknown values should pass through unchanged
+	result := NormalizeAttestationLoS("totally_invalid")
+	assert.Equal(t, "totally_invalid", result)
+}
+
+func TestNormalizeBindingType_Invalid(t *testing.T) {
+	result := NormalizeBindingType("unknown_type")
+	assert.Equal(t, "unknown_type", result)
+}
+
+func TestNormalizeLegacyValues(t *testing.T) {
+	assert.Equal(t, "iso_18045_high", NormalizeAttestationLoS("high"))
+	assert.Equal(t, "iso_18045_moderate", NormalizeAttestationLoS("substantial"))
+	assert.Equal(t, "iso_18045_basic", NormalizeAttestationLoS("low"))
+	assert.Equal(t, "key", NormalizeBindingType("cnf"))
+	assert.Equal(t, "key", NormalizeBindingType("holder"))
+}
+
+func TestParseSource_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.schema-meta.yaml")
+
+	content := `attestation_los: [[[invalid
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	_, err := ParseSource(path)
+	assert.Error(t, err)
+}
+
+func TestInferLegacy_DefaultVersion(t *testing.T) {
+	sm := InferLegacy("org", "slug", "https://example.com", []string{"dc+sd-jwt"}, map[string]string{".vctm.json": "/path/to/file"})
+	assert.Equal(t, "0.1.0", sm.Version)
+}

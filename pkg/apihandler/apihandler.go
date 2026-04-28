@@ -12,6 +12,13 @@ import (
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
 )
 
+// jsonError writes a JSON error response with the correct Content-Type header.
+func jsonError(w http.ResponseWriter, msg string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
 // Handler serves the TS11 API endpoints.
 type Handler struct {
 	schemas []*schemameta.SchemaMeta
@@ -43,6 +50,24 @@ func (h *Handler) Register(mux *http.ServeMux) {
 
 func (h *Handler) listSchemas(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+
+	// Validate enum parameters
+	if v := paramVal(q, "attestationLoS"); v != "" && !schemameta.ValidAttestationLoS[v] {
+		jsonError(w, "invalid attestationLoS value", http.StatusBadRequest)
+		return
+	}
+	if v := paramVal(q, "bindingType"); v != "" && !schemameta.ValidBindingType[v] {
+		jsonError(w, "invalid bindingType value", http.StatusBadRequest)
+		return
+	}
+	if vals := paramVals(q, "supportedFormats"); len(vals) > 0 {
+		for _, f := range vals {
+			if !schemameta.ValidSupportedFormat(f) {
+				jsonError(w, "invalid supportedFormats value: "+f, http.StatusBadRequest)
+				return
+			}
+		}
+	}
 
 	filtered := h.filterSchemas(q)
 
@@ -82,7 +107,7 @@ func (h *Handler) getSchema(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.Error(w, `{"error":"schema not found"}`, http.StatusNotFound)
+	jsonError(w, "schema not found", http.StatusNotFound)
 }
 
 func (h *Handler) getJWKS(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +155,7 @@ func (h *Handler) getAttribute(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.Error(w, `{"error":"attribute not found"}`, http.StatusNotFound)
+	jsonError(w, "attribute not found", http.StatusNotFound)
 }
 
 func (h *Handler) filterAttributes(q map[string][]string) []attributes.Attribute {
@@ -159,12 +184,12 @@ func (h *Handler) writeResponse(w http.ResponseWriter, r *http.Request, data any
 	if h.signer != nil {
 		jsonData, err := json.Marshal(data)
 		if err != nil {
-			http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+			jsonError(w, "internal error", http.StatusInternalServerError)
 			return
 		}
 		compact, err := h.signer.Sign(json.RawMessage(jsonData))
 		if err != nil {
-			http.Error(w, `{"error":"signing failed"}`, http.StatusInternalServerError)
+			jsonError(w, "signing failed", http.StatusInternalServerError)
 			return
 		}
 		if h.jku != "" {

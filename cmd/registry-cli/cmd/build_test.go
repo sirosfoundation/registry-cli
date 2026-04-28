@@ -411,3 +411,26 @@ func TestWriteVCTMRegistryJSON_EmptyCredentials(t *testing.T) {
 	assert.NotNil(t, index["name"])
 	assert.Equal(t, "2.0", index["version"])
 }
+
+func TestAttrFilename(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"urn:siros:attr:given-name:abc123", "given-name_abc123"},
+		{"urn:siros:attr:family-name:def456", "family-name_def456"},
+		{"urn:siros:attr:a:b-c:hash", "a_b-c_hash"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			assert.Equal(t, tt.expected, attrFilename(tt.input))
+		})
+	}
+}
+
+func TestAttrFilename_NoCollision(t *testing.T) {
+	// "a:b-c" and "a-b:c" should produce different filenames
+	f1 := attrFilename("urn:siros:attr:a:b-c")
+	f2 := attrFilename("urn:siros:attr:a-b:c")
+	assert.NotEqual(t, f1, f2, "different identifiers must produce different filenames")
+}

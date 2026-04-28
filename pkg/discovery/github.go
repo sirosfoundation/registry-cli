@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/go-github/v62/github"
 	"golang.org/x/oauth2"
@@ -59,8 +60,11 @@ func (r *GitHubResolver) Resolve(source string) ([]ResolvedRepo, error) {
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
 	for {
-		result, resp, err := r.Client.Search.Repositories(context.Background(), query, opts)
+		result, resp, err := r.Client.Search.Repositories(ctx, query, opts)
 		if err != nil {
 			return nil, fmt.Errorf("GitHub search for %q: %w", query, err)
 		}

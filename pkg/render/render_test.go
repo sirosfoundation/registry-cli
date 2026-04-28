@@ -199,6 +199,23 @@ Normal **bold** text.
 	assert.Contains(t, result, "<strong>bold</strong>")
 }
 
+func TestRenderMarkdown_SanitizesSVGXSS(t *testing.T) {
+	md := []byte(`<svg><script>alert('svg-xss')</script></svg>
+
+<object data="data:text/html,<script>alert(1)</script>"></object>
+
+<embed src="javascript:alert(1)">
+`)
+	html, err := RenderMarkdown(md)
+	require.NoError(t, err)
+	result := string(html)
+
+	assert.NotContains(t, result, "<script>")
+	assert.NotContains(t, result, "<svg>")
+	assert.NotContains(t, result, "<object")
+	assert.NotContains(t, result, "<embed")
+}
+
 func TestRenderTS11Docs(t *testing.T) {
 	r, err := NewRenderer("")
 	require.NoError(t, err)

@@ -611,9 +611,16 @@ func cloneRepo(repoURL, branch, dest, token string) error {
 // including VCTM content, format files, and rulebook rendering.
 func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir string, schemas []*schemameta.SchemaMeta, baseURL string, ts11Compliant map[string]bool) ([]render.CredentialData, error) {
 	var credentials []render.CredentialData
+	seenSlugs := make(map[string]bool)
 
 	for _, sm := range schemas {
 		org, slug := orgSlugFromID(sm, baseURL)
+
+		key := org + "/" + slug
+		if seenSlugs[key] {
+			slog.Default().Warn("duplicate credential slug, later entry wins", "org", org, "slug", slug, "id", sm.ID)
+		}
+		seenSlugs[key] = true
 
 		cred := render.CredentialData{
 			Org:           org,
@@ -668,11 +675,14 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			}
 
 			// Read and parse VCTM JSON (try .vctm.json first, then bare .vctm, then bare .json)
+			logger := slog.Default()
 			vctmPath := filepath.Join(repoDir, slug+".vctm.json")
 			if data, err := os.ReadFile(vctmPath); err == nil {
 				cred.RawVCTMJSON = prettyFormatJSON(data)
 				var vctm render.VCTMData
-				if jsonErr := json.Unmarshal(data, &vctm); jsonErr == nil {
+				if jsonErr := json.Unmarshal(data, &vctm); jsonErr != nil {
+					logger.Warn("invalid VCTM JSON", "file", vctmPath, "error", jsonErr)
+				} else {
 					cred.VCTM = &vctm
 				}
 			} else {
@@ -681,7 +691,9 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 				if data, err := os.ReadFile(bareVCTMPath); err == nil {
 					cred.RawVCTMJSON = prettyFormatJSON(data)
 					var vctm render.VCTMData
-					if jsonErr := json.Unmarshal(data, &vctm); jsonErr == nil {
+					if jsonErr := json.Unmarshal(data, &vctm); jsonErr != nil {
+						logger.Warn("invalid VCTM JSON", "file", bareVCTMPath, "error", jsonErr)
+					} else {
 						cred.VCTM = &vctm
 					}
 				} else {
@@ -690,7 +702,9 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 					if data, err := os.ReadFile(bareJSONPath); err == nil {
 						cred.RawVCTMJSON = prettyFormatJSON(data)
 						var vctm render.VCTMData
-						if jsonErr := json.Unmarshal(data, &vctm); jsonErr == nil {
+						if jsonErr := json.Unmarshal(data, &vctm); jsonErr != nil {
+							logger.Warn("invalid VCTM JSON", "file", bareJSONPath, "error", jsonErr)
+						} else {
 							cred.VCTM = &vctm
 						}
 					}
@@ -1021,9 +1035,11 @@ func writeAttributeOutputs(outputDir string, catalogue []attributes.Attribute) e
 }
 
 // attrFilename converts an attribute identifier like "urn:siros:attr:given-name:abc123"
-// into a safe filename "given-name-abc123".
+// into a safe filename. Uses the full suffix after "urn:siros:attr:" with colons
+// replaced by dashes, preserving the hash component to avoid collisions.
 func attrFilename(id string) string {
-	// Strip urn:siros:attr: prefix and replace colons with dashes
 	s := strings.TrimPrefix(id, "urn:siros:attr:")
-	return strings.ReplaceAll(s, ":", "-")
+	// Replace colons with underscores (not dashes) to avoid collision between
+	// "a:b-c" and "a-b:c" which would both become "a-b-c" with dash replacement.
+	return strings.ReplaceAll(s, ":", "_")
 }

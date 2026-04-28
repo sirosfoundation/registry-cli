@@ -348,3 +348,59 @@ func TestListAttributes_Pagination(t *testing.T) {
 	assert.Len(t, result.Data, 1)
 	assert.Equal(t, "urn:siros:attr:family-name:def456", result.Data[0].Identifier)
 }
+
+func TestListSchemas_InvalidAttestationLoS(t *testing.T) {
+	_, mux := setupHandler(t)
+
+	req := httptest.NewRequest("GET", "/api/v1/schemas?attestationLoS=bogus", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Body.String(), "invalid attestationLoS")
+}
+
+func TestListSchemas_InvalidBindingType(t *testing.T) {
+	_, mux := setupHandler(t)
+
+	req := httptest.NewRequest("GET", "/api/v1/schemas?bindingType=invalid", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid bindingType")
+}
+
+func TestListSchemas_InvalidSupportedFormats(t *testing.T) {
+	_, mux := setupHandler(t)
+
+	req := httptest.NewRequest("GET", "/api/v1/schemas?supportedFormats=not_a_format", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid supportedFormats")
+}
+
+func TestGetSchema_NotFound_ContentType(t *testing.T) {
+	_, mux := setupHandler(t)
+
+	req := httptest.NewRequest("GET", "/api/v1/schemas/nonexistent-id", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+}
+
+func TestGetAttribute_NotFound_ContentType(t *testing.T) {
+	_, mux := setupHandlerWithAttrs(t)
+
+	req := httptest.NewRequest("GET", "/api/v1/attributes/nonexistent", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+}
