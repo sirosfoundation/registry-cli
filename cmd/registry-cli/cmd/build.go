@@ -274,21 +274,22 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		logger.Info("converted markdown credential", "slug", c.Slug, "formats", len(c.Files))
 	}
 
-	// Find schema-meta files
-	entries, err := os.ReadDir(repoDir)
-	if err != nil {
-		return nil, fmt.Errorf("reading repo dir: %w", err)
-	}
-
+	// Find schema-meta files (walk into subdirectories)
 	var schemas []*schemameta.SchemaMeta
 	knownSlugs := make(map[string]bool)
 
 	// First pass: find schema-meta files (TS11 credentials)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	if walkErr := filepath.WalkDir(repoDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		name := entry.Name()
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
 		var slug string
 		switch {
 		case strings.HasSuffix(name, ".schema-meta.yaml"):
@@ -296,23 +297,25 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		case strings.HasSuffix(name, ".schema-meta.json"):
 			slug = strings.TrimSuffix(name, ".schema-meta.json")
 		default:
-			continue
+			return nil
 		}
 
-		src, parseErr := schemameta.ParseSource(filepath.Join(repoDir, name))
+		credDir := filepath.Dir(path)
+
+		src, parseErr := schemameta.ParseSource(path)
 		if parseErr != nil {
-			logger.Warn("skipping schema-meta", "file", name, "error", parseErr)
-			continue
+			logger.Warn("skipping schema-meta", "file", path, "error", parseErr)
+			return nil
 		}
 
-		formats, formatFiles, fmtErr := schemameta.DetectFormats(repoDir, slug)
+		formats, formatFiles, fmtErr := schemameta.DetectFormats(credDir, slug)
 		if fmtErr != nil {
 			logger.Warn("detecting formats", "slug", slug, "error", fmtErr)
-			continue
+			return nil
 		}
 
 		// Check for co-located rulebook.md
-		rulebookPath := filepath.Join(repoDir, "rulebook.md")
+		rulebookPath := filepath.Join(credDir, "rulebook.md")
 		if src.RulebookURI == "" {
 			if _, statErr := os.Stat(rulebookPath); statErr == nil {
 				src.RulebookURI = fmt.Sprintf("%s/%s/%s/rulebook.html", baseURL, org, slug)
@@ -326,9 +329,13 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		logger.Info("processed credential",
 			"org", org, "slug", slug, "id", sm.ID,
 			"formats", sm.SupportedFormats)
+		return nil
+	}); walkErr != nil {
+		return nil, fmt.Errorf("walking repo dir: %w", walkErr)
 	}
 
 	// Second pass: discover legacy VCTM-only credentials (no schema-meta)
+	// Walk subdirectories as well
 	legacySlugs, err := schemameta.DetectLegacyCredentials(repoDir, knownSlugs)
 	if err != nil {
 		logger.Warn("detecting legacy credentials", "error", err)
@@ -647,15 +654,9 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 				repoDir = filepath.Join(workDir, repoOrg, extractRepoName(repo.URL))
 			}
 
-			// Verify this repo has either a schema-meta file or a VCTM file for this slug
-			found := false
-			for _, ext := range []string{".schema-meta.yaml", ".schema-meta.json", ".vctm.json", ".vctm", ".json"} {
-				if _, err := os.Stat(filepath.Join(repoDir, slug+ext)); err == nil {
-					found = true
-					break
-				}
-			}
-			if !found {
+			// Find the directory containing this credential's files (may be a subdirectory)
+			credDir := findCredDir(repoDir, slug)
+			if credDir == "" {
 				continue
 			}
 
@@ -664,8 +665,11 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			cred.SourceOrg = repoOrg
 			cred.SourceRepo = extractRepoName(repo.URL)
 
-			// Read rulebook
-			rulebookPath := filepath.Join(repoDir, "rulebook.md")
+			// Read rulebook (check credential dir, then repo root)
+			rulebookPath := filepath.Join(credDir, "rulebook.md")
+			if _, statErr := os.Stat(rulebookPath); statErr != nil {
+				rulebookPath = filepath.Join(repoDir, "rulebook.md")
+			}
 			if data, err := os.ReadFile(rulebookPath); err == nil {
 				html, renderErr := render.RenderMarkdown(data)
 				if renderErr == nil {
@@ -676,7 +680,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 
 			// Read and parse VCTM JSON (try .vctm.json first, then bare .vctm, then bare .json)
 			logger := slog.Default()
-			vctmPath := filepath.Join(repoDir, slug+".vctm.json")
+			vctmPath := filepath.Join(credDir, slug+".vctm.json")
 			if data, err := os.ReadFile(vctmPath); err == nil {
 				cred.RawVCTMJSON = prettyFormatJSON(data)
 				var vctm render.VCTMData
@@ -687,7 +691,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 				}
 			} else {
 				// Try bare .vctm extension (legacy repos like SUNET/vc)
-				bareVCTMPath := filepath.Join(repoDir, slug+".vctm")
+				bareVCTMPath := filepath.Join(credDir, slug+".vctm")
 				if data, err := os.ReadFile(bareVCTMPath); err == nil {
 					cred.RawVCTMJSON = prettyFormatJSON(data)
 					var vctm render.VCTMData
@@ -698,7 +702,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 					}
 				} else {
 					// Try bare .json (repos like demo-credentials)
-					bareJSONPath := filepath.Join(repoDir, slug+".json")
+					bareJSONPath := filepath.Join(credDir, slug+".json")
 					if data, err := os.ReadFile(bareJSONPath); err == nil {
 						cred.RawVCTMJSON = prettyFormatJSON(data)
 						var vctm render.VCTMData
@@ -712,22 +716,22 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			}
 
 			// Read mDOC JSON
-			mdocPath := filepath.Join(repoDir, slug+".mdoc.json")
+			mdocPath := filepath.Join(credDir, slug+".mdoc.json")
 			if data, err := os.ReadFile(mdocPath); err == nil {
 				cred.RawMdocJSON = prettyFormatJSON(data)
 				cred.HasMdoc = true
 			}
 
 			// Read W3C VC JSON
-			vcPath := filepath.Join(repoDir, slug+".vc.json")
+			vcPath := filepath.Join(credDir, slug+".vc.json")
 			if data, err := os.ReadFile(vcPath); err == nil {
 				cred.RawVCJSON = prettyFormatJSON(data)
 				cred.HasVC = true
 			}
 
 			// Build available formats and copy format files to output
-			cred.AvailableFormats = buildFormatInfo(org, slug, repoDir)
-			copyFormatFiles(repoDir, outputDir, org, slug)
+			cred.AvailableFormats = buildFormatInfo(org, slug, credDir)
+			copyFormatFiles(credDir, outputDir, org, slug)
 
 			break
 		}
@@ -739,6 +743,39 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 	}
 
 	return credentials, nil
+}
+
+// findCredDir searches repoDir (and subdirectories) for credential files
+// matching slug. Returns the directory containing the files, or "" if not found.
+func findCredDir(repoDir, slug string) string {
+	exts := []string{".schema-meta.yaml", ".schema-meta.json", ".vctm.json", ".vctm", ".json"}
+	// Check root first
+	for _, ext := range exts {
+		if _, err := os.Stat(filepath.Join(repoDir, slug+ext)); err == nil {
+			return repoDir
+		}
+	}
+	// Walk subdirectories
+	var found string
+	_ = filepath.WalkDir(repoDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || found != "" {
+			return filepath.SkipAll
+		}
+		if d.IsDir() {
+			if strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		for _, ext := range exts {
+			if d.Name() == slug+ext {
+				found = filepath.Dir(path)
+				return filepath.SkipAll
+			}
+		}
+		return nil
+	})
+	return found
 }
 
 // orgSlugFromID extracts org and slug by reversing the UUID generation.
