@@ -5,15 +5,15 @@
 //
 // Test organization follows the spec structure:
 //
-//   Section 4.3.1 — SchemaMeta main class data model
-//   Section 4.3.2 — Schema sub-class
-//   Section 4.3.3 — TrustAuthority sub-class
-//   Section 4.3.4 — Format-specific data schemas
-//   Section 5.2.1 — Query access (public, read-only)
-//   Section 5.3.1 — GET /schemas (filtering, pagination)
-//   Section 5.3.1 — GET /schemas/{schemaId}
-//   Annex A.2   — JSON Schema validation
-//   Annex A.3   — OpenAPI compliance
+//	Section 4.3.1 — SchemaMeta main class data model
+//	Section 4.3.2 — Schema sub-class
+//	Section 4.3.3 — TrustAuthority sub-class
+//	Section 4.3.4 — Format-specific data schemas
+//	Section 5.2.1 — Query access (public, read-only)
+//	Section 5.3.1 — GET /schemas (filtering, pagination)
+//	Section 5.3.1 — GET /schemas/{schemaId}
+//	Annex A.2   — JSON Schema validation
+//	Annex A.3   — OpenAPI compliance
 package ts11compliance
 
 import (
@@ -42,11 +42,11 @@ func ts11Catalogue() []*schemameta.SchemaMeta {
 	return []*schemameta.SchemaMeta{
 		{
 			// Schema 1: QEAA-level PID with high LoS, key binding, dual format, ETSI TL trust
-			ID:             "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-			Version:        "1.0.0",
-			AttestationLoS: "iso_18045_high",
-			BindingType:    "key",
-			RulebookURI:    "https://rulebooks.example.eu/pid/v1#sha256-abc123",
+			ID:               "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+			Version:          "1.0.0",
+			AttestationLoS:   "iso_18045_high",
+			BindingType:      "key",
+			RulebookURI:      "https://rulebooks.example.eu/pid/v1#sha256-abc123",
 			SupportedFormats: []string{"dc+sd-jwt", "mso_mdoc"},
 			SchemaURIs: []schemameta.SchemaURI{
 				{FormatIdentifier: "dc+sd-jwt", URI: "https://catalogue.example.eu/schemas/pid-sdjwt.json"},
@@ -58,11 +58,11 @@ func ts11Catalogue() []*schemameta.SchemaMeta {
 		},
 		{
 			// Schema 2: EAA with moderate LoS, claim binding, single format, OpenID Federation trust
-			ID:             "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-			Version:        "2.1.0",
-			AttestationLoS: "iso_18045_moderate",
-			BindingType:    "claim",
-			RulebookURI:    "https://rulebooks.example.eu/diploma/v2",
+			ID:               "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+			Version:          "2.1.0",
+			AttestationLoS:   "iso_18045_moderate",
+			BindingType:      "claim",
+			RulebookURI:      "https://rulebooks.example.eu/diploma/v2",
 			SupportedFormats: []string{"jwt_vc_json"},
 			SchemaURIs: []schemameta.SchemaURI{
 				{FormatIdentifier: "jwt_vc_json", URI: "https://catalogue.example.eu/schemas/diploma-vc.json"},
@@ -73,11 +73,11 @@ func ts11Catalogue() []*schemameta.SchemaMeta {
 		},
 		{
 			// Schema 3: Enhanced-basic LoS, biometric binding, ldp_vc format, AKI trust
-			ID:             "cccccccc-cccc-cccc-cccc-cccccccccccc",
-			Version:        "1.0.0",
-			AttestationLoS: "iso_18045_enhanced-basic",
-			BindingType:    "biometric",
-			RulebookURI:    "https://rulebooks.example.eu/ehic/v1",
+			ID:               "cccccccc-cccc-cccc-cccc-cccccccccccc",
+			Version:          "1.0.0",
+			AttestationLoS:   "iso_18045_enhanced-basic",
+			BindingType:      "biometric",
+			RulebookURI:      "https://rulebooks.example.eu/ehic/v1",
 			SupportedFormats: []string{"ldp_vc"},
 			SchemaURIs: []schemameta.SchemaURI{
 				{FormatIdentifier: "ldp_vc", URI: "https://catalogue.example.eu/schemas/ehic-ldp.json"},
@@ -88,11 +88,11 @@ func ts11Catalogue() []*schemameta.SchemaMeta {
 		},
 		{
 			// Schema 4: Basic LoS, no binding, jwt_vc_json-ld, LoTE trusted list, multi-format
-			ID:             "dddddddd-dddd-dddd-dddd-dddddddddddd",
-			Version:        "0.9.0",
-			AttestationLoS: "iso_18045_basic",
-			BindingType:    "none",
-			RulebookURI:    "https://rulebooks.example.eu/demo/v1",
+			ID:               "dddddddd-dddd-dddd-dddd-dddddddddddd",
+			Version:          "0.9.0",
+			AttestationLoS:   "iso_18045_basic",
+			BindingType:      "none",
+			RulebookURI:      "https://rulebooks.example.eu/demo/v1",
 			SupportedFormats: []string{"jwt_vc_json-ld", "dc+sd-jwt"},
 			SchemaURIs: []schemameta.SchemaURI{
 				{FormatIdentifier: "jwt_vc_json-ld", URI: "https://catalogue.example.eu/schemas/demo-vcld.json"},
@@ -104,11 +104,11 @@ func ts11Catalogue() []*schemameta.SchemaMeta {
 		},
 		{
 			// Schema 5: High LoS, key binding, all five formats, multiple trust authorities
-			ID:             "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
-			Version:        "3.0.0",
-			AttestationLoS: "iso_18045_high",
-			BindingType:    "key",
-			RulebookURI:    "https://rulebooks.example.eu/multiformat/v3",
+			ID:               "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+			Version:          "3.0.0",
+			AttestationLoS:   "iso_18045_high",
+			BindingType:      "key",
+			RulebookURI:      "https://rulebooks.example.eu/multiformat/v3",
 			SupportedFormats: []string{"dc+sd-jwt", "mso_mdoc", "jwt_vc_json", "jwt_vc_json-ld", "ldp_vc"},
 			SchemaURIs: []schemameta.SchemaURI{
 				{FormatIdentifier: "dc+sd-jwt", URI: "https://catalogue.example.eu/schemas/multi-sdjwt.json"},

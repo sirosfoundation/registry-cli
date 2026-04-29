@@ -284,7 +284,9 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 			return err
 		}
 		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") {
+			name := d.Name()
+			// Skip hidden dirs and common build-output dirs
+			if strings.HasPrefix(name, ".") || name == "dist" || name == "build" || name == "node_modules" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -297,6 +299,11 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		case strings.HasSuffix(name, ".schema-meta.json"):
 			slug = strings.TrimSuffix(name, ".schema-meta.json")
 		default:
+			return nil
+		}
+
+		// Skip if we already processed this slug (e.g. found in a parent dir)
+		if knownSlugs[slug] {
 			return nil
 		}
 
