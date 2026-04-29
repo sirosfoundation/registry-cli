@@ -754,27 +754,33 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 
 // findCredDir searches repoDir (and subdirectories) for credential files
 // matching slug. Returns the directory containing the files, or "" if not found.
+// Prefers directories with schema-meta files over bare format files.
 func findCredDir(repoDir, slug string) string {
-	exts := []string{".schema-meta.yaml", ".schema-meta.json", ".vctm.json", ".vctm", ".json"}
-	// Check root first
-	for _, ext := range exts {
+	// Priority order: prefer schema-meta, then specific format files, then bare .json
+	metaExts := []string{".schema-meta.yaml", ".schema-meta.json"}
+	formatExts := []string{".vctm.json", ".mdoc.json", ".vc.json", ".vctm"}
+
+	// Check root first (all extensions)
+	for _, ext := range append(metaExts, formatExts...) {
 		if _, err := os.Stat(filepath.Join(repoDir, slug+ext)); err == nil {
 			return repoDir
 		}
 	}
-	// Walk subdirectories
+
+	// Walk subdirectories: first pass for schema-meta + format files
 	var found string
 	_ = filepath.WalkDir(repoDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || found != "" {
 			return filepath.SkipAll
 		}
 		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") {
+			name := d.Name()
+			if strings.HasPrefix(name, ".") || name == "dist" || name == "build" || name == "node_modules" || name == "vendor" {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		for _, ext := range exts {
+		for _, ext := range append(metaExts, formatExts...) {
 			if d.Name() == slug+ext {
 				found = filepath.Dir(path)
 				return filepath.SkipAll

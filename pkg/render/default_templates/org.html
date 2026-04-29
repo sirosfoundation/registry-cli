@@ -35,7 +35,7 @@
       <tbody>
         {{range .Credentials}}
         <tr>
-          <td><a href="/{{.Org}}/{{.Slug}}/">{{if .VCTM}}{{.VCTM.Name}}{{else}}{{.Slug}}{{end}}</a></td>
+          <td><a href="/{{.Org}}/{{.Slug}}/">{{if and .VCTM .VCTM.Name}}{{.VCTM.Name}}{{else}}{{.Slug}}{{end}}</a></td>
           <td>{{join ", " .Schema.SupportedFormats}}</td>
           <td>{{.Schema.AttestationLoS}}</td>
           <td>{{.Schema.BindingType}}</td>
