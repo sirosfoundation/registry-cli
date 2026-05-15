@@ -343,25 +343,25 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 
 	// Second pass: discover legacy VCTM-only credentials (no schema-meta)
 	// Walk subdirectories as well
-	legacySlugs, err := schemameta.DetectLegacyCredentials(repoDir, knownSlugs)
+	legacyCreds, err := schemameta.DetectLegacyCredentials(repoDir, knownSlugs)
 	if err != nil {
 		logger.Warn("detecting legacy credentials", "error", err)
 	}
-	for _, slug := range legacySlugs {
-		formats, formatFiles, err := schemameta.DetectFormats(repoDir, slug)
+	for _, lc := range legacyCreds {
+		formats, formatFiles, err := schemameta.DetectFormats(lc.Dir, lc.Slug)
 		if err != nil {
-			logger.Warn("detecting formats for legacy credential", "slug", slug, "error", err)
+			logger.Warn("detecting formats for legacy credential", "slug", lc.Slug, "error", err)
 			continue
 		}
 		if len(formats) == 0 {
 			continue
 		}
 
-		sm := schemameta.InferLegacy(org, slug, baseURL, formats, formatFiles)
+		sm := schemameta.InferLegacy(org, lc.Slug, baseURL, formats, formatFiles)
 		schemas = append(schemas, sm)
 
 		logger.Info("processed legacy credential",
-			"org", org, "slug", slug, "id", sm.ID,
+			"org", org, "slug", lc.Slug, "id", sm.ID,
 			"formats", sm.SupportedFormats)
 	}
 

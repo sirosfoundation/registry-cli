@@ -335,24 +335,60 @@ func TestDetectLegacyCredentials(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "readme.md"), []byte("# hi"), 0o644))
 
 	knownSlugs := map[string]bool{"known": true}
-	slugs, err := DetectLegacyCredentials(dir, knownSlugs)
+	creds, err := DetectLegacyCredentials(dir, knownSlugs)
 	require.NoError(t, err)
+	slugs := make([]string, len(creds))
+	for i, c := range creds {
+		slugs[i] = c.Slug
+	}
 	assert.Contains(t, slugs, "cred_a")
 	assert.Contains(t, slugs, "cred_b")
 	assert.NotContains(t, slugs, "known")
-	assert.Equal(t, 2, len(slugs))
+	assert.Equal(t, 2, len(creds))
 }
 
 func TestDetectLegacyCredentials_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	slugs, err := DetectLegacyCredentials(dir, nil)
+	creds, err := DetectLegacyCredentials(dir, nil)
 	require.NoError(t, err)
-	assert.Empty(t, slugs)
+	assert.Empty(t, creds)
 }
 
 func TestDetectLegacyCredentials_NonexistentDir(t *testing.T) {
 	_, err := DetectLegacyCredentials("/nonexistent/path", nil)
 	assert.Error(t, err)
+}
+
+func TestDetectLegacyCredentials_Subdirectory(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a subdirectory with a credential
+	subDir := filepath.Join(dir, "credentials")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "sub_cred.vctm.json"), []byte("{}"), 0o644))
+
+	// Also a root-level credential
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "root_cred.vctm.json"), []byte("{}"), 0o644))
+
+	creds, err := DetectLegacyCredentials(dir, nil)
+	require.NoError(t, err)
+	slugs := make([]string, len(creds))
+	for i, c := range creds {
+		slugs[i] = c.Slug
+	}
+	assert.Contains(t, slugs, "sub_cred")
+	assert.Contains(t, slugs, "root_cred")
+	assert.Equal(t, 2, len(creds))
+
+	// Verify the subdirectory credential has the correct Dir
+	for _, c := range creds {
+		if c.Slug == "sub_cred" {
+			assert.Equal(t, subDir, c.Dir)
+		}
+		if c.Slug == "root_cred" {
+			assert.Equal(t, dir, c.Dir)
+		}
+	}
 }
 
 func TestValidateRaw_AdditionalProperties(t *testing.T) {

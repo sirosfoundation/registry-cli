@@ -144,21 +144,30 @@ func InferLegacy(org, slug, baseURL string, formats []string, formatFiles map[st
 	return sm
 }
 
-// DetectLegacyCredentials scans a directory for VCTM files (.vctm.json or .vctm)
-// that do NOT have a corresponding schema-meta file, returning their slugs.
-func DetectLegacyCredentials(dir string, knownSlugs map[string]bool) ([]string, error) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, fmt.Errorf("reading directory %s: %w", dir, err)
-	}
+// LegacyCredential describes a credential discovered via format files (no schema-meta).
+type LegacyCredential struct {
+	Slug string // credential slug
+	Dir  string // directory containing the format files
+}
 
+// DetectLegacyCredentials scans a directory tree for VCTM files (.vctm.json or .vctm)
+// that do NOT have a corresponding schema-meta file, returning their slugs and directories.
+func DetectLegacyCredentials(dir string, knownSlugs map[string]bool) ([]LegacyCredential, error) {
 	seen := make(map[string]bool)
-	var slugs []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
+	var creds []LegacyCredential
+
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-		name := entry.Name()
+		if d.IsDir() {
+			name := d.Name()
+			if strings.HasPrefix(name, ".") || name == "dist" || name == "build" || name == "node_modules" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		name := d.Name()
 		for _, ext := range LegacyVCTMExtensions {
 			if strings.HasSuffix(name, ext) {
 				slug := strings.TrimSuffix(name, ext)
@@ -166,11 +175,16 @@ func DetectLegacyCredentials(dir string, knownSlugs map[string]bool) ([]string, 
 					continue
 				}
 				seen[slug] = true
-				slugs = append(slugs, slug)
+				creds = append(creds, LegacyCredential{Slug: slug, Dir: filepath.Dir(path)})
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		return creds, fmt.Errorf("walking directory %s: %w", dir, err)
 	}
-	return slugs, nil
+
+	return creds, nil
 }
 
 // ParseSource reads a schema-meta.yaml (or .json) file.
