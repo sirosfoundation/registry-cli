@@ -8,6 +8,9 @@
 A CLI tool for building TS11-compliant Catalogue of Attestations sites from
 credential schemas discovered across GitHub repositories.
 
+> **Naming note:** The SIROS ecosystem has three components with "registry" in the name — see
+> [Which registry is which?](#which-registry-is-which) below.
+
 ## Overview
 
 `registry-cli` discovers credential type metadata (VCTMs) from configured
@@ -125,6 +128,16 @@ make test-softhsm      # Include SoftHSM PKCS#11 integration tests
 make coverage           # Coverage report
 make lint               # Run linter
 ```
+
+## Which registry is which?
+
+The SIROS ecosystem has three components with "registry" in the name. They serve different purposes:
+
+| Component | Repository | Purpose |
+|-----------|-----------|---------|
+| **registry-cli** | [sirosfoundation/registry-cli](https://github.com/sirosfoundation/registry-cli) | **Publishing side.** Offline CLI that discovers credential schemas from Git repositories, validates them, and produces a static site with a TS11-compliant API. Powers [registry.siros.org](https://registry.siros.org). |
+| **go-wallet-backend registry** | [sirosfoundation/go-wallet-backend](https://github.com/sirosfoundation/go-wallet-backend) (`cmd/registry/`) | **Consumer side.** Microservice that fetches and caches credential type metadata (VCTMs) from registry.siros.org (or any compatible registry) and serves it to wallet clients. |
+| **VC registry** | [SUNET/vc](https://github.com/SUNET/vc) (`cmd/registry/`) | **Unrelated.** Manages Token Status Lists for credential revocation (per [draft-ietf-oauth-status-list](https://datatracker.ietf.org/doc/draft-ietf-oauth-status-list/)). Despite the name, this has nothing to do with credential type metadata. |
 
 ## License
 
