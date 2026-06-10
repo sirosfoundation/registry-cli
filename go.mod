@@ -1,6 +1,6 @@
 module github.com/sirosfoundation/registry-cli
 
-go 1.26
+go 1.26.4
 
 require (
 	github.com/ThalesGroup/crypto11 v1.6.0
