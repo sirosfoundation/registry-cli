@@ -127,6 +127,19 @@
         "isLOTE": {
           "description": "optional boolean qualifier set TRUE for LoTE type of ETSI trusted list",
           "type": "boolean"
+        },
+        "trustMarkId": {
+          "description": "URI of a Trust Mark the issuer must hold. Only applicable when frameworkType is openid_federation.",
+          "type": "string",
+          "format": "uri"
+        },
+        "trustMarkIssuers": {
+          "description": "Accepted Trust Mark Issuers for the specified Trust Mark. If absent, any issuer trusted by the Trust Anchor is accepted. Only applicable when trustMarkId is present.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
         }
       },
       "required": ["frameworkType", "value"],

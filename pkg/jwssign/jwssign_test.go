@@ -4,6 +4,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -389,4 +390,65 @@ func TestEphemeralSigner_Close(t *testing.T) {
 	assert.NoError(t, signer.Close())
 	// Double-close should also be safe
 	assert.NoError(t, signer.Close())
+}
+
+func TestAlgorithmForKey_ECDSACurves(t *testing.T) {
+	tests := []struct {
+		name  string
+		curve elliptic.Curve
+		want  jose.SignatureAlgorithm
+	}{
+		{"P-256", elliptic.P256(), jose.ES256},
+		{"P-384", elliptic.P384(), jose.ES384},
+		{"P-521", elliptic.P521(), jose.ES512},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, err := ecdsa.GenerateKey(tt.curve, rand.Reader)
+			require.NoError(t, err)
+			alg, err := algorithmForKey(&key.PublicKey)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, alg)
+		})
+	}
+}
+
+func TestAlgorithmForKey_RSA(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	alg, err := algorithmForKey(&key.PublicKey)
+	require.NoError(t, err)
+	assert.Equal(t, jose.RS256, alg)
+}
+
+func TestAlgorithmForKey_UnsupportedType(t *testing.T) {
+	_, err := algorithmForKey("not a key")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported key type")
+}
+
+func TestNewSigner_MissingModule(t *testing.T) {
+	_, err := NewSigner(Config{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "PKCS11Module is required")
+}
+
+func TestSignFile_NonexistentFile(t *testing.T) {
+	signer, err := NewEphemeralSigner("issuer", "")
+	require.NoError(t, err)
+	defer signer.Close()
+
+	_, err = signer.SignFile("/nonexistent/path.json")
+	assert.Error(t, err)
+}
+
+func TestSignDirectory_NoMatches(t *testing.T) {
+	signer, err := NewEphemeralSigner("issuer", "")
+	require.NoError(t, err)
+	defer signer.Close()
+
+	dir := t.TempDir()
+	signed, err := signer.SignDirectory(dir, "*.json")
+	require.NoError(t, err)
+	assert.Empty(t, signed)
 }
