@@ -12,12 +12,13 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/config"
-	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/vctm"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
 	"gopkg.in/yaml.v3"
+
+	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/config"
+	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/vctm"
 )
 
 // Parser parses markdown files and generates VCTM

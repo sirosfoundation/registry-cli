@@ -4,6 +4,7 @@ package w3c
 import (
 	"encoding/json"
 	"strings"
+	"unicode"
 
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/config"
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats"
@@ -94,7 +95,9 @@ func (g *Generator) deriveTypes(parsed *formats.ParsedCredential, cfg *config.Co
 		types = append(types, typeName)
 	} else if parsed.ID != "" {
 		// Convert "pid" to "Pid"
-		types = append(types, strings.Title(parsed.ID))
+		r := []rune(parsed.ID)
+		r[0] = unicode.ToUpper(r[0])
+		types = append(types, string(r))
 	}
 
 	return types

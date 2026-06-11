@@ -14,8 +14,8 @@ type mockGenerator struct {
 	extension   string
 }
 
-func (m *mockGenerator) Name() string        { return m.name }
-func (m *mockGenerator) Description() string { return m.description }
+func (m *mockGenerator) Name() string          { return m.name }
+func (m *mockGenerator) Description() string   { return m.description }
 func (m *mockGenerator) FileExtension() string { return m.extension }
 func (m *mockGenerator) Generate(parsed *ParsedCredential, cfg *config.Config) ([]byte, error) {
 	return []byte(`{"test": true}`), nil
@@ -248,7 +248,7 @@ func contains(s, substr string) bool {
 
 func TestFormatJSON(t *testing.T) {
 	data := map[string]interface{}{
-		"name": "test",
+		"name":  "test",
 		"value": 42,
 	}
 

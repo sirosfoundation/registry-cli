@@ -40,9 +40,9 @@ func TestGenerator_DeriveIdentifier(t *testing.T) {
 	cfg := &config.Config{}
 
 	tests := []struct {
-		name   string
-		cred   *formats.ParsedCredential
-		want   string
+		name string
+		cred *formats.ParsedCredential
+		want string
 	}{
 		{
 			name: "uses VCT when present",
@@ -187,9 +187,9 @@ func TestGenerator_Generate_WithMetadata(t *testing.T) {
 		ID:   "test",
 		Name: "Test",
 		Metadata: map[string]interface{}{
-			"extends":            "https://example.com/base",
-			"extends#integrity":  "sha256-abc123",
-			"schema_uri":         "https://example.com/schema",
+			"extends":              "https://example.com/base",
+			"extends#integrity":    "sha256-abc123",
+			"schema_uri":           "https://example.com/schema",
 			"schema_uri#integrity": "sha256-def456",
 		},
 	}
