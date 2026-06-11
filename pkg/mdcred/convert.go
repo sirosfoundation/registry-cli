@@ -1,5 +1,4 @@
-// Package mdcred converts markdown credential definitions to VCTM format files
-// using the mtcvctm library.
+// Package mdcred converts markdown credential definitions to VCTM format files.
 package mdcred
 
 import (
@@ -8,13 +7,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sirosfoundation/mtcvctm/pkg/config"
-	"github.com/sirosfoundation/mtcvctm/pkg/parser"
+	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/config"
+	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/parser"
 
 	// Import format generators to trigger init() registration
-	_ "github.com/sirosfoundation/mtcvctm/pkg/formats/mddl"
-	_ "github.com/sirosfoundation/mtcvctm/pkg/formats/vctmfmt"
-	_ "github.com/sirosfoundation/mtcvctm/pkg/formats/w3c"
+	_ "github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats/mddl"
+	_ "github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats/vctmfmt"
+	_ "github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats/w3c"
 )
 
 // ConvertResult describes a credential converted from markdown.
