@@ -69,6 +69,35 @@ trusted_authorities:
 	assert.Nil(t, src.TrustedAuthorities[1].IsLOTE)
 }
 
+func TestParseSource_WithOIDFTrustMarks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.schema-meta.yaml")
+
+	content := `attestation_los: iso_18045_high
+binding_type: key
+trusted_authorities:
+  - framework_type: openid_federation
+    value: https://trust-anchor.example.org
+    trust_mark_id: https://tmi.example.org/trust-marks/pid-issuer
+    trust_mark_issuers:
+      - https://tmi.example.org
+      - https://tmi2.example.org
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	src, err := ParseSource(path)
+	require.NoError(t, err)
+	require.Len(t, src.TrustedAuthorities, 1)
+	ta := src.TrustedAuthorities[0]
+	assert.Equal(t, "openid_federation", ta.FrameworkType)
+	assert.Equal(t, "https://trust-anchor.example.org", ta.Value)
+	assert.Equal(t, "https://tmi.example.org/trust-marks/pid-issuer", ta.TrustMarkID)
+	require.Len(t, ta.TrustMarkIssuers, 2)
+	assert.Equal(t, "https://tmi.example.org", ta.TrustMarkIssuers[0])
+	assert.Equal(t, "https://tmi2.example.org", ta.TrustMarkIssuers[1])
+	assert.Nil(t, ta.IsLOTE)
+}
+
 func TestGenerateID_Deterministic(t *testing.T) {
 	id1 := GenerateID("sirosfoundation", "vctm_pid_arf_1_5")
 	id2 := GenerateID("sirosfoundation", "vctm_pid_arf_1_5")
@@ -295,6 +324,55 @@ func TestValidate_WithTrustedAuthorities(t *testing.T) {
 	}
 
 	assert.NoError(t, v.Validate(sm))
+}
+
+func TestValidate_WithOIDFTrustMarks(t *testing.T) {
+	v, err := NewValidator()
+	require.NoError(t, err)
+
+	sm := &SchemaMeta{
+		ID:               GenerateID("org", "slug"),
+		Version:          "1.0.0",
+		AttestationLoS:   "iso_18045_high",
+		BindingType:      "key",
+		RulebookURI:      "https://example.com/rulebook",
+		SupportedFormats: []string{"dc+sd-jwt"},
+		SchemaURIs: []SchemaURI{
+			{FormatIdentifier: "dc+sd-jwt", URI: "https://example.com/schema.json"},
+		},
+		TrustedAuthorities: []TrustAuthority{
+			{
+				FrameworkType:    "openid_federation",
+				Value:            "https://trust-anchor.example.org",
+				TrustMarkID:      "https://tmi.example.org/trust-marks/pid-issuer",
+				TrustMarkIssuers: []string{"https://tmi.example.org"},
+			},
+		},
+	}
+
+	assert.NoError(t, v.Validate(sm))
+}
+
+func TestValidateRaw_OIDFTrustMarks(t *testing.T) {
+	v, err := NewValidator()
+	require.NoError(t, err)
+
+	obj := map[string]any{
+		"id":               "urn:test:id",
+		"version":          "1.0.0",
+		"attestationLoS":   "iso_18045_high",
+		"bindingType":      "key",
+		"rulebookURI":      "https://example.com/rb",
+		"supportedFormats": []any{"dc+sd-jwt"},
+		"schemaURIs":       []any{map[string]any{"formatIdentifier": "dc+sd-jwt", "uri": "https://example.com/s.json"}},
+		"trustedAuthorities": []any{map[string]any{
+			"frameworkType":    "openid_federation",
+			"value":            "https://trust-anchor.example.org",
+			"trustMarkId":      "https://tmi.example.org/trust-marks/pid-issuer",
+			"trustMarkIssuers": []any{"https://tmi.example.org"},
+		}},
+	}
+	assert.NoError(t, v.ValidateRaw(obj))
 }
 
 func TestValidSupportedFormat(t *testing.T) {

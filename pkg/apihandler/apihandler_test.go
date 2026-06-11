@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/sirosfoundation/registry-cli/pkg/attributes"
+	"github.com/sirosfoundation/registry-cli/pkg/jwssign"
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
 )
 
@@ -52,6 +54,25 @@ func testSchemas() []*schemameta.SchemaMeta {
 				{FormatIdentifier: "mso_mdoc", URI: "https://example.com/s3.mdoc.json"},
 			},
 		},
+		{
+			ID:               "44444444-4444-4444-4444-444444444444",
+			Version:          "1.0.0",
+			AttestationLoS:   "iso_18045_high",
+			BindingType:      "key",
+			RulebookURI:      "https://example.com/rb4",
+			SupportedFormats: []string{"dc+sd-jwt"},
+			SchemaURIs: []schemameta.SchemaURI{
+				{FormatIdentifier: "dc+sd-jwt", URI: "https://example.com/s4.json"},
+			},
+			TrustedAuthorities: []schemameta.TrustAuthority{
+				{
+					FrameworkType:    "openid_federation",
+					Value:            "https://trust-anchor.example.org",
+					TrustMarkID:      "https://tmi.example.org/trust-marks/pid-issuer",
+					TrustMarkIssuers: []string{"https://tmi.example.org"},
+				},
+			},
+		},
 	}
 }
 
@@ -75,8 +96,8 @@ func TestListSchemas_NoFilter(t *testing.T) {
 
 	var result PaginatedSchemaList
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
-	assert.Equal(t, 3, result.Total)
-	assert.Equal(t, 3, len(result.Data))
+	assert.Equal(t, 4, result.Total)
+	assert.Equal(t, 4, len(result.Data))
 	assert.Equal(t, 20, result.Limit)
 	assert.Equal(t, 0, result.Offset)
 }
@@ -103,7 +124,7 @@ func TestListSchemas_FilterByAttestationLoS(t *testing.T) {
 
 	var result PaginatedSchemaList
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
-	assert.Equal(t, 2, result.Total)
+	assert.Equal(t, 3, result.Total)
 }
 
 func TestListSchemas_FilterByBindingType(t *testing.T) {
@@ -179,7 +200,7 @@ func TestListSchemas_Pagination(t *testing.T) {
 
 	var result PaginatedSchemaList
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
-	assert.Equal(t, 3, result.Total)
+	assert.Equal(t, 4, result.Total)
 	assert.Equal(t, 1, len(result.Data))
 	assert.Equal(t, 1, result.Limit)
 	assert.Equal(t, 1, result.Offset)
@@ -403,4 +424,99 @@ func TestGetAttribute_NotFound_ContentType(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+}
+
+func TestListSchemas_FilterByOIDFTrustAuthority(t *testing.T) {
+	_, mux := setupHandler(t)
+
+	req := httptest.NewRequest("GET", "/api/v1/schemas?trustedAuthoritiesFrameworkType=openid_federation", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	var result PaginatedSchemaList
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &result))
+	assert.Equal(t, 1, result.Total)
+	assert.Equal(t, "44444444-4444-4444-4444-444444444444", result.Data[0].ID)
+	// Verify trust mark fields round-trip through JSON
+	require.Len(t, result.Data[0].TrustedAuthorities, 1)
+	ta := result.Data[0].TrustedAuthorities[0]
+	assert.Equal(t, "https://tmi.example.org/trust-marks/pid-issuer", ta.TrustMarkID)
+	assert.Equal(t, []string{"https://tmi.example.org"}, ta.TrustMarkIssuers)
+}
+
+func TestGetSchema_OIDFTrustMarksInResponse(t *testing.T) {
+	_, mux := setupHandler(t)
+
+	req := httptest.NewRequest("GET", "/api/v1/schemas/44444444-4444-4444-4444-444444444444", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var sm schemameta.SchemaMeta
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sm))
+	require.Len(t, sm.TrustedAuthorities, 1)
+	ta := sm.TrustedAuthorities[0]
+	assert.Equal(t, "openid_federation", ta.FrameworkType)
+	assert.Equal(t, "https://trust-anchor.example.org", ta.Value)
+	assert.Equal(t, "https://tmi.example.org/trust-marks/pid-issuer", ta.TrustMarkID)
+	assert.Equal(t, []string{"https://tmi.example.org"}, ta.TrustMarkIssuers)
+}
+
+func setupSignedHandler(t *testing.T) (*Handler, *http.ServeMux) {
+	t.Helper()
+	signer, err := jwssign.NewEphemeralSigner("test-issuer", "https://example.com/.well-known/jwks.json")
+	require.NoError(t, err)
+	t.Cleanup(func() { signer.Close() })
+	h := New(testSchemas(), signer, "https://example.com/.well-known/jwks.json")
+	mux := http.NewServeMux()
+	h.Register(mux)
+	return h, mux
+}
+
+func TestWriteResponse_Signed(t *testing.T) {
+	_, mux := setupSignedHandler(t)
+
+	req := httptest.NewRequest("GET", "/api/v1/schemas/11111111-1111-1111-1111-111111111111", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/jwt", w.Header().Get("Content-Type"))
+	assert.Equal(t, "https://example.com/.well-known/jwks.json", w.Header().Get("x-jku-url"))
+	// Body should be a JWS compact serialization (3 dot-separated parts)
+	parts := strings.Split(w.Body.String(), ".")
+	assert.Len(t, parts, 3, "signed response should be JWS compact serialization")
+}
+
+func TestGetJWKS(t *testing.T) {
+	_, mux := setupSignedHandler(t)
+
+	req := httptest.NewRequest("GET", "/.well-known/jwks.json", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+	var jwks map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &jwks))
+	keys, ok := jwks["keys"].([]any)
+	require.True(t, ok, "JWKS should have keys array")
+	assert.Len(t, keys, 1)
+}
+
+func TestWriteResponse_Unsigned(t *testing.T) {
+	_, mux := setupHandler(t) // setupHandler uses nil signer
+
+	req := httptest.NewRequest("GET", "/api/v1/schemas/11111111-1111-1111-1111-111111111111", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	assert.Empty(t, w.Header().Get("x-jku-url"))
+	// Body should be valid JSON, not JWT
+	var sm schemameta.SchemaMeta
+	assert.NoError(t, json.Unmarshal(w.Body.Bytes(), &sm))
+	assert.Equal(t, "11111111-1111-1111-1111-111111111111", sm.ID)
 }

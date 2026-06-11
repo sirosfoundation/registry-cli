@@ -16,9 +16,11 @@ var UUIDNamespace = uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8") // DN
 
 // TrustAuthority represents a trust framework reference per TS11 Section 4.3.3.
 type TrustAuthority struct {
-	FrameworkType string `yaml:"framework_type" json:"frameworkType"`
-	Value         string `yaml:"value" json:"value"`
-	IsLOTE        *bool  `yaml:"is_lote,omitempty" json:"isLOTE,omitempty"`
+	FrameworkType    string   `yaml:"framework_type" json:"frameworkType"`
+	Value            string   `yaml:"value" json:"value"`
+	IsLOTE           *bool    `yaml:"is_lote,omitempty" json:"isLOTE,omitempty"`
+	TrustMarkID      string   `yaml:"trust_mark_id,omitempty" json:"trustMarkId,omitempty"`
+	TrustMarkIssuers []string `yaml:"trust_mark_issuers,omitempty" json:"trustMarkIssuers,omitempty"`
 }
 
 // SchemaMetaSource represents the manually-authored fields from schema-meta.yaml.
