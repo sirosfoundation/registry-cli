@@ -215,13 +215,7 @@ func (g *Generator) Generate(parsed *formats.ParsedCredential, cfg *config.Confi
 				}
 			}
 
-			prop := mapTypeToJSONSchema(claim.Type)
-			prop.Title = claim.DisplayName
-			if prop.Title == "" {
-				prop.Title = claim.Name
-			}
-			prop.Description = claim.Description
-
+			prop := claimToSchemaProperty(claim, parsed.ClaimMappings)
 			credSubject.Properties[claimName] = prop
 
 			if claim.Mandatory {
@@ -258,10 +252,70 @@ func mapTypeToJSONSchema(mdType string) *SchemaProperty {
 	case "image":
 		return &SchemaProperty{Type: "string", ContentEncoding: "base64"}
 	case "object":
-		return &SchemaProperty{Type: "object"}
+		return &SchemaProperty{Type: "object", Properties: make(map[string]*SchemaProperty)}
 	case "array":
 		return &SchemaProperty{Type: "array", Items: &SchemaProperty{Type: "string"}}
 	default:
 		return &SchemaProperty{Type: "string"}
 	}
+}
+
+// claimToSchemaProperty converts a ClaimDefinition to a JSON Schema property,
+// recursively building nested properties for object and array types.
+func claimToSchemaProperty(claim formats.ClaimDefinition, claimMappings map[string]map[string]string) *SchemaProperty {
+	prop := mapTypeToJSONSchema(claim.Type)
+	prop.Title = claim.DisplayName
+	if prop.Title == "" {
+		prop.Title = claim.Name
+	}
+	prop.Description = claim.Description
+
+	// Build nested properties from children
+	if len(claim.Children) > 0 {
+		switch strings.ToLower(claim.Type) {
+		case "object":
+			if prop.Properties == nil {
+				prop.Properties = make(map[string]*SchemaProperty)
+			}
+			for _, child := range claim.Children {
+				childName := child.Name
+				if mapping, ok := child.FormatMappings["w3c"]; ok {
+					childName = mapping
+				}
+				if mappings, ok := claimMappings["w3c"]; ok {
+					if mapped, ok := mappings[child.Name]; ok {
+						childName = mapped
+					}
+				}
+				prop.Properties[childName] = claimToSchemaProperty(child, claimMappings)
+				if child.Mandatory {
+					prop.Required = append(prop.Required, childName)
+				}
+			}
+		case "array":
+			// Array items: build an object schema from children
+			itemSchema := &SchemaProperty{
+				Type:       "object",
+				Properties: make(map[string]*SchemaProperty),
+			}
+			for _, child := range claim.Children {
+				childName := child.Name
+				if mapping, ok := child.FormatMappings["w3c"]; ok {
+					childName = mapping
+				}
+					if mappings, ok := claimMappings["w3c"]; ok {
+						if mapped, ok := mappings[child.Name]; ok {
+							childName = mapped
+						}
+					}
+				itemSchema.Properties[childName] = claimToSchemaProperty(child, claimMappings)
+				if child.Mandatory {
+					itemSchema.Required = append(itemSchema.Required, childName)
+				}
+			}
+			prop.Items = itemSchema
+		}
+	}
+
+	return prop
 }

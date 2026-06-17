@@ -442,3 +442,50 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+func TestGenerator_Generate_NestedObjectClaims(t *testing.T) {
+	g := NewGenerator()
+	cfg := &config.Config{Language: "en-US"}
+
+	cred := &formats.ParsedCredential{
+		Name:      "Test",
+		DocType:   "org.example.test",
+		Namespace: "org.example.test",
+		Claims: []formats.ClaimDefinition{
+			{
+				Name:        "address",
+				DisplayName: "Address",
+				Type:        "object",
+				Children: []formats.ClaimDefinition{
+					{Name: "street", DisplayName: "Street", Type: "string"},
+					{Name: "city", DisplayName: "City", Type: "string", Mandatory: true},
+				},
+			},
+		},
+	}
+
+	output, err := g.Generate(cred, cfg)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		t.Fatalf("json.Unmarshal error = %v", err)
+	}
+
+	claims := raw["claims"].(map[string]interface{})
+	ns := claims["org.example.test"].(map[string]interface{})
+
+	// Object children should be flattened with dot notation
+	if ns["address.street"] == nil {
+		t.Error("missing address.street (flattened claim)")
+	}
+	if ns["address.city"] == nil {
+		t.Error("missing address.city (flattened claim)")
+	}
+	// Parent "address" should NOT be emitted directly
+	if ns["address"] != nil {
+		t.Error("container 'address' should not be emitted as a leaf claim")
+	}
+}

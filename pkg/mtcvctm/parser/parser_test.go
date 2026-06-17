@@ -1039,3 +1039,76 @@ func TestParser_buildRendering_InlineSVG(t *testing.T) {
 		t.Errorf("URIIntegrity should be empty for inline images, got %q", rendering.SVGTemplates[0].URIIntegrity)
 	}
 }
+
+func TestParser_ParseContent_NestedObjectClaims(t *testing.T) {
+	cfg := &config.Config{
+		Language: "en-US",
+	}
+	p := NewParser(cfg)
+
+	content := []byte("---\nvct: https://example.com/test\n---\n# Test\n\nTest credential.\n\n## Claims\n\n" +
+		"- `name` (string): Full name [mandatory]\n" +
+		"- `address` \"Address\" (object): Residential address\n" +
+		"  - `street` \"Street\" (string): Street name\n" +
+		"  - `city` \"City\" (string): City name [mandatory]\n" +
+		"  - `zip` \"Zip\" (string): Zip code\n" +
+		"- `age` (integer): Age\n")
+
+	parsed, err := p.ParseContent(content, "/test/test.md")
+	if err != nil {
+		t.Fatalf("ParseContent() error = %v", err)
+	}
+
+	// Should have 3 top-level claims
+	if len(parsed.Claims) != 3 {
+		t.Fatalf("expected 3 top-level claims, got %d", len(parsed.Claims))
+	}
+
+	addr, ok := parsed.Claims["address"]
+	if !ok {
+		t.Fatal("missing 'address' claim")
+	}
+	if addr.Type != "object" {
+		t.Errorf("address type = %q, want object", addr.Type)
+	}
+	if len(addr.Children) != 3 {
+		t.Fatalf("address children = %d, want 3", len(addr.Children))
+	}
+	if addr.Children[0].Name != "street" {
+		t.Errorf("first child = %q, want street", addr.Children[0].Name)
+	}
+	if addr.Children[1].Name != "city" {
+		t.Errorf("second child = %q, want city", addr.Children[1].Name)
+	}
+	if !addr.Children[1].Mandatory {
+		t.Error("city should be mandatory")
+	}
+}
+
+func TestParser_ParseContent_NestedArrayClaims(t *testing.T) {
+	cfg := &config.Config{
+		Language: "en-US",
+	}
+	p := NewParser(cfg)
+
+	content := []byte("---\nvct: https://example.com/test\n---\n# Test\n\nTest credential.\n\n## Claims\n\n" +
+		"- `contacts` \"Contacts\" (array): List of contacts\n" +
+		"  - `email` \"Email\" (string): Email address\n" +
+		"  - `phone` \"Phone\" (string): Phone number\n")
+
+	parsed, err := p.ParseContent(content, "/test/test.md")
+	if err != nil {
+		t.Fatalf("ParseContent() error = %v", err)
+	}
+
+	contacts, ok := parsed.Claims["contacts"]
+	if !ok {
+		t.Fatal("missing 'contacts' claim")
+	}
+	if contacts.Type != "array" {
+		t.Errorf("contacts type = %q, want array", contacts.Type)
+	}
+	if len(contacts.Children) != 2 {
+		t.Fatalf("contacts children = %d, want 2", len(contacts.Children))
+	}
+}

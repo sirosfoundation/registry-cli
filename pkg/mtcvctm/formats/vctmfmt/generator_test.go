@@ -524,3 +524,60 @@ func contains(s, substr string) bool {
 func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
+
+func TestGenerator_Generate_NestedObjectClaims(t *testing.T) {
+	g := &Generator{}
+	cfg := &config.Config{Language: "en-US"}
+
+	cred := &formats.ParsedCredential{
+		Name:        "Test",
+		VCT:         "https://example.com/test",
+		Description: "Test",
+		Claims: []formats.ClaimDefinition{
+			{
+				Name:        "address",
+				DisplayName: "Address",
+				Type:        "object",
+				Path:        []string{"address"},
+				Children: []formats.ClaimDefinition{
+					{Name: "street", DisplayName: "Street", Type: "string", Path: []string{"address", "street"}},
+					{Name: "city", DisplayName: "City", Type: "string", Path: []string{"address", "city"}, Mandatory: true},
+				},
+			},
+		},
+	}
+
+	output, err := g.Generate(cred, cfg)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		t.Fatalf("json.Unmarshal error = %v", err)
+	}
+
+	claims, ok := raw["claims"].([]interface{})
+	if !ok {
+		t.Fatal("missing claims array")
+	}
+
+	// Should have parent + 2 children = 3 claim entries
+	if len(claims) != 3 {
+		t.Fatalf("expected 3 claims, got %d", len(claims))
+	}
+
+	// First claim should be the parent "address"
+	first := claims[0].(map[string]interface{})
+	path := first["path"].([]interface{})
+	if len(path) != 1 || path[0] != "address" {
+		t.Errorf("first claim path = %v, want [address]", path)
+	}
+
+	// Second should be "address.street"
+	second := claims[1].(map[string]interface{})
+	path2 := second["path"].([]interface{})
+	if len(path2) != 2 || path2[0] != "address" || path2[1] != "street" {
+		t.Errorf("second claim path = %v, want [address, street]", path2)
+	}
+}

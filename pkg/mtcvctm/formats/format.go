@@ -107,6 +107,9 @@ type ClaimDefinition struct {
 
 	// FormatMappings maps format name to claim name override
 	FormatMappings map[string]string
+
+	// Children contains nested claim definitions for object and array types
+	Children []ClaimDefinition
 }
 
 // ClaimLocalization contains localized claim display
