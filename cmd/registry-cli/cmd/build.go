@@ -241,7 +241,7 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 	// Validate repo.Path if set: must be relative, no traversal
 	if repo.Path != "" {
 		clean := filepath.Clean(repo.Path)
-		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+		if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || containsDotDot(clean) {
 			return nil, fmt.Errorf("source path must be a relative path within the repo: %q", repo.Path)
 		}
 	}
@@ -1110,4 +1110,14 @@ func attrFilename(id string) string {
 	// Replace colons with underscores (not dashes) to avoid collision between
 	// "a:b-c" and "a-b:c" which would both become "a-b-c" with dash replacement.
 	return strings.ReplaceAll(s, ":", "_")
+}
+
+// containsDotDot reports whether the cleaned path contains ".." as a segment.
+func containsDotDot(p string) bool {
+	for _, seg := range strings.Split(p, string(filepath.Separator)) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }

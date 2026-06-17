@@ -38,7 +38,7 @@ func ConvertDirPath(dir, subPath, baseURL string) ([]ConvertResult, error) {
 	if subPath != "" {
 		// Clean the path and ensure it doesn't escape the repo dir
 		clean := filepath.Clean(subPath)
-		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+		if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || containsDotDot(clean) {
 			return nil, fmt.Errorf("subpath must be a relative path within the repo: %q", subPath)
 		}
 		walkRoot = filepath.Join(dir, clean)
@@ -150,4 +150,14 @@ func convertFile(mdPath, slug, outputDir, baseURL string) (*ConvertResult, error
 	}
 
 	return result, nil
+}
+
+// containsDotDot reports whether the cleaned path contains ".." as a segment.
+func containsDotDot(p string) bool {
+	for _, seg := range strings.Split(p, string(filepath.Separator)) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }

@@ -271,3 +271,16 @@ func TestConvertDirPath_RejectsPathTraversal(t *testing.T) {
 		assert.Contains(t, err.Error(), "relative path")
 	}
 }
+
+func TestConvertDirPath_AllowsDotPrefixedDirs(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a ..cache directory (valid, not traversal)
+	cacheDir := filepath.Join(dir, "..cache")
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+
+	// Should not error (even though no .md files exist)
+	results, err := ConvertDirPath(dir, "..cache", "https://example.com")
+	require.NoError(t, err)
+	assert.Len(t, results, 0)
+}

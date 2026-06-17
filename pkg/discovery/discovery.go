@@ -148,6 +148,9 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 					if entry.Organization != "" {
 						repos[i].Organization = entry.Organization
 					}
+					if entry.Path != "" {
+						repos[i].Path = entry.Path
+					}
 				}
 				discovered = append(discovered, repos...)
 				resolved = true

@@ -3,6 +3,7 @@ package discovery
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -481,4 +482,46 @@ defaults:
 	m, err := LoadManifest(path)
 	require.NoError(t, err)
 	assert.Equal(t, "credentials/", m.Sources[0].Path)
+}
+
+func TestResolveAll_PathPropagatedForMetaSource(t *testing.T) {
+	// Mock resolver that returns a single repo
+	mockResolver := &mockMetaResolver{
+		handles: func(s string) bool { return strings.HasPrefix(s, "mock:") },
+		resolve: func(s string) ([]ResolvedRepo, error) {
+			return []ResolvedRepo{
+				{URL: "https://github.com/org/repo.git"},
+			}, nil
+		},
+	}
+
+	m := &SourceManifest{
+		Sources: []SourceEntry{
+			{
+				URL:  "mock:something",
+				Path: "credentials/v1",
+			},
+		},
+		Defaults: SourceDefaults{Branch: "main"},
+	}
+
+	repos, err := ResolveAll(m, []Resolver{mockResolver})
+	require.NoError(t, err)
+	require.Len(t, repos, 1)
+	assert.Equal(t, "credentials/v1", repos[0].Path)
+	assert.Equal(t, "main", repos[0].Branch)
+}
+
+// mockMetaResolver implements Resolver for testing
+type mockMetaResolver struct {
+	handles func(string) bool
+	resolve func(string) ([]ResolvedRepo, error)
+}
+
+func (m *mockMetaResolver) Handles(source string) bool {
+	return m.handles(source)
+}
+
+func (m *mockMetaResolver) Resolve(source string) ([]ResolvedRepo, error) {
+	return m.resolve(source)
 }
