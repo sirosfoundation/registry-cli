@@ -97,6 +97,11 @@ func (p *Parser) ToCredential(parsed *ParsedMarkdown) *formats.ParsedCredential 
 			}
 		}
 
+
+		// Convert children recursively
+		if len(claim.Children) > 0 {
+			claimDef.Children = convertChildren(claim.Children, parts)
+		}
 		cred.Claims = append(cred.Claims, claimDef)
 	}
 
@@ -169,4 +174,36 @@ func OutputFileName(baseName, formatName string) string {
 		return baseName + "." + formatName
 	}
 	return baseName + "." + gen.FileExtension()
+}
+
+// convertChildren recursively converts parser ClaimDefs to format ClaimDefinitions,
+// building full paths from the parent path.
+func convertChildren(children []ClaimDef, parentPath []string) []formats.ClaimDefinition {
+	result := make([]formats.ClaimDefinition, 0, len(children))
+	for _, child := range children {
+		childPath := append(append([]string{}, parentPath...), child.Name)
+		childDef := formats.ClaimDefinition{
+			Name:           child.Name,
+			Path:           childPath,
+			DisplayName:    child.DisplayName,
+			Type:           child.Type,
+			Description:    child.Description,
+			Mandatory:      child.Mandatory,
+			SD:             child.SD,
+			SvgId:          child.SvgId,
+			Localizations:  make(map[string]formats.ClaimLocalization),
+			FormatMappings: make(map[string]string),
+		}
+		for locale, loc := range child.Localizations {
+			childDef.Localizations[locale] = formats.ClaimLocalization{
+				Label:       loc.Label,
+				Description: loc.Description,
+			}
+		}
+		if len(child.Children) > 0 {
+			childDef.Children = convertChildren(child.Children, childPath)
+		}
+		result = append(result, childDef)
+	}
+	return result
 }

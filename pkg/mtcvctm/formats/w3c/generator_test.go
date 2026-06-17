@@ -475,3 +475,120 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
+
+func TestGenerator_Generate_NestedObjectClaims(t *testing.T) {
+	g := NewGenerator()
+	cfg := &config.Config{Language: "en-US"}
+
+	cred := &formats.ParsedCredential{
+		Name: "Test",
+		Claims: []formats.ClaimDefinition{
+			{
+				Name:        "address",
+				DisplayName: "Address",
+				Type:        "object",
+				Children: []formats.ClaimDefinition{
+					{Name: "street", DisplayName: "Street", Type: "string"},
+					{Name: "city", DisplayName: "City", Type: "string", Mandatory: true},
+				},
+			},
+		},
+	}
+
+	output, err := g.Generate(cred, cfg)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		t.Fatalf("json.Unmarshal error = %v", err)
+	}
+
+	// Navigate: credentialSchema.properties.credentialSubject.properties.address
+	cs := raw["credentialSchema"].(map[string]interface{})
+	props := cs["properties"].(map[string]interface{})
+	csProps := props["credentialSubject"].(map[string]interface{})["properties"].(map[string]interface{})
+	addr := csProps["address"].(map[string]interface{})
+
+	if addr["type"] != "object" {
+		t.Errorf("address type = %v, want object", addr["type"])
+	}
+	addrProps, ok := addr["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("address should have nested properties")
+	}
+	if addrProps["street"] == nil {
+		t.Error("missing address.street")
+	}
+	if addrProps["city"] == nil {
+		t.Error("missing address.city")
+	}
+	// city should be required
+	required, ok := addr["required"].([]interface{})
+	if !ok {
+		t.Fatal("address should have required array")
+	}
+	found := false
+	for _, r := range required {
+		if r == "city" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("city should be in address.required")
+	}
+}
+
+func TestGenerator_Generate_NestedArrayClaims(t *testing.T) {
+	g := NewGenerator()
+	cfg := &config.Config{Language: "en-US"}
+
+	cred := &formats.ParsedCredential{
+		Name: "Test",
+		Claims: []formats.ClaimDefinition{
+			{
+				Name:        "contacts",
+				DisplayName: "Contacts",
+				Type:        "array",
+				Children: []formats.ClaimDefinition{
+					{Name: "email", DisplayName: "Email", Type: "string"},
+					{Name: "phone", DisplayName: "Phone", Type: "string"},
+				},
+			},
+		},
+	}
+
+	output, err := g.Generate(cred, cfg)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	var raw map[string]interface{}
+	if err := json.Unmarshal(output, &raw); err != nil {
+		t.Fatalf("json.Unmarshal error = %v", err)
+	}
+
+	cs := raw["credentialSchema"].(map[string]interface{})
+	props := cs["properties"].(map[string]interface{})
+	csProps := props["credentialSubject"].(map[string]interface{})["properties"].(map[string]interface{})
+	contacts := csProps["contacts"].(map[string]interface{})
+
+	if contacts["type"] != "array" {
+		t.Errorf("contacts type = %v, want array", contacts["type"])
+	}
+	items, ok := contacts["items"].(map[string]interface{})
+	if !ok {
+		t.Fatal("contacts should have items schema")
+	}
+	itemProps, ok := items["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatal("contacts items should have properties")
+	}
+	if itemProps["email"] == nil {
+		t.Error("missing contacts.items.email")
+	}
+	if itemProps["phone"] == nil {
+		t.Error("missing contacts.items.phone")
+	}
+}

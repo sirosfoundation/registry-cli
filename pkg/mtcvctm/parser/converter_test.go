@@ -524,3 +524,54 @@ func TestToCredential_FormatsFieldEmpty(t *testing.T) {
 		t.Errorf("Formats = %q, want empty", cred.Formats)
 	}
 }
+func TestToCredential_NestedChildren(t *testing.T) {
+	cfg := &config.Config{
+		Language:  "en-US",
+		InputFile: "/test/path/test.md",
+	}
+	p := NewParser(cfg)
+
+	parsed := &ParsedMarkdown{
+		Title:       "Test",
+		Description: "Test",
+		Sections:    map[string]string{},
+		Claims: map[string]ClaimDef{
+			"name": {Name: "name", Type: "string", DisplayName: "Name"},
+			"address": {
+				Name: "address", Type: "object", DisplayName: "Address",
+				Localizations: map[string]ClaimLocalization{},
+				Children: []ClaimDef{
+					{Name: "street", Type: "string", DisplayName: "Street", Localizations: map[string]ClaimLocalization{}},
+					{Name: "city", Type: "string", DisplayName: "City", Mandatory: true, Localizations: map[string]ClaimLocalization{}},
+				},
+			},
+		},
+		Metadata: map[string]string{
+			"vct": "https://example.com/test",
+		},
+		DisplayLocalizations: map[string]DisplayLocalization{},
+	}
+
+	cred := p.ToCredential(parsed)
+
+	// Find the address claim
+	var addrClaim *formats.ClaimDefinition
+	for i := range cred.Claims {
+		if cred.Claims[i].Name == "address" {
+			addrClaim = &cred.Claims[i]
+			break
+		}
+	}
+	if addrClaim == nil {
+		t.Fatal("missing address claim in converted credential")
+	}
+	if len(addrClaim.Children) != 2 {
+		t.Fatalf("address children = %d, want 2", len(addrClaim.Children))
+	}
+	if addrClaim.Children[0].Name != "street" {
+		t.Errorf("first child = %q, want street", addrClaim.Children[0].Name)
+	}
+	if !addrClaim.Children[1].Mandatory {
+		t.Error("city child should be mandatory")
+	}
+}
