@@ -38,6 +38,7 @@ type SourceEntry struct {
 	URL          string `yaml:"url"`
 	Organization string `yaml:"organization,omitempty"`
 	Branch       string `yaml:"branch,omitempty"`
+	Path         string `yaml:"path,omitempty"`
 }
 
 // UnmarshalYAML allows SourceEntry to be parsed from either a plain string
@@ -57,6 +58,7 @@ type ResolvedRepo struct {
 	Branch       string // branch to fetch from
 	Origin       string // how this repo was discovered (e.g. "explicit", "github:topic/vctm")
 	Organization string // explicit organization label (empty = infer from URL)
+	Path         string // optional relative path within the repo to restrict credential discovery
 }
 
 // Resolver resolves meta-sources into concrete repos.
@@ -105,6 +107,7 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 				Branch:       branch,
 				Origin:       "explicit",
 				Organization: entry.Organization,
+				Path:         entry.Path,
 			}
 			continue
 		}
@@ -125,6 +128,7 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 				Branch:       "",
 				Origin:       "local",
 				Organization: org,
+				Path:         entry.Path,
 			}
 			continue
 		}

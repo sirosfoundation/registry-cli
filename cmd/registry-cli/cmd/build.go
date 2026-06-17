@@ -266,7 +266,7 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 	}
 
 	// Pass 0: convert markdown credential files to VCTM format files
-	converted, err := mdcred.ConvertDir(repoDir, baseURL)
+	converted, err := mdcred.ConvertDirPath(repoDir, repo.Path, baseURL)
 	if err != nil {
 		logger.Warn("markdown credential conversion", "error", err)
 	}
@@ -278,8 +278,14 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 	var schemas []*schemameta.SchemaMeta
 	knownSlugs := make(map[string]bool)
 
+	// Determine walk root: restrict to repo.Path if set
+	schemaWalkRoot := repoDir
+	if repo.Path != "" {
+		schemaWalkRoot = filepath.Join(repoDir, repo.Path)
+	}
+
 	// First pass: find schema-meta files (TS11 credentials)
-	if walkErr := filepath.WalkDir(repoDir, func(path string, d os.DirEntry, err error) error {
+	if walkErr := filepath.WalkDir(schemaWalkRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -343,7 +349,11 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 
 	// Second pass: discover legacy VCTM-only credentials (no schema-meta)
 	// Walk subdirectories as well
-	legacyCreds, err := schemameta.DetectLegacyCredentials(repoDir, knownSlugs)
+	legacyWalkRoot := repoDir
+	if repo.Path != "" {
+		legacyWalkRoot = filepath.Join(repoDir, repo.Path)
+	}
+	legacyCreds, err := schemameta.DetectLegacyCredentials(legacyWalkRoot, knownSlugs)
 	if err != nil {
 		logger.Warn("detecting legacy credentials", "error", err)
 	}

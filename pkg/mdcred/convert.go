@@ -28,9 +28,20 @@ type ConvertResult struct {
 // credentials. Already-existing output files are skipped (the repo may have
 // pre-built them).
 func ConvertDir(dir, baseURL string) ([]ConvertResult, error) {
+	return ConvertDirPath(dir, "", baseURL)
+}
+
+// ConvertDirPath works like ConvertDir but restricts discovery to the given
+// relative subPath within dir. If subPath is empty, the entire dir is scanned.
+func ConvertDirPath(dir, subPath, baseURL string) ([]ConvertResult, error) {
+	walkRoot := dir
+	if subPath != "" {
+		walkRoot = filepath.Join(dir, subPath)
+	}
+
 	var results []ConvertResult
 
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(walkRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
