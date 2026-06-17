@@ -257,7 +257,7 @@ func parseClaimsList(list *ast.List, content []byte, parsed *ParsedMarkdown) {
 // the claim pattern are treated as child claim definitions. Otherwise
 // (or if they match the locale pattern) they are treated as localizations.
 func parseNestedListItems(nestedList *ast.List, content []byte, parent *ClaimDef) {
-	isContainer := parent.Type == "object" || parent.Type == "array"
+	isContainer := strings.EqualFold(parent.Type, "object") || strings.EqualFold(parent.Type, "array")
 
 	for nestedItem := nestedList.FirstChild(); nestedItem != nil; nestedItem = nestedItem.NextSibling() {
 		nestedListItem, ok := nestedItem.(*ast.ListItem)
@@ -578,6 +578,9 @@ func extractText(node ast.Node, source []byte) string {
 				}
 			}
 			buf.WriteString("`")
+		} else if _, isList := c.(*ast.List); isList {
+			// Skip nested lists — their content belongs to child claims
+			continue
 		} else {
 			buf.WriteString(extractText(c, source))
 		}

@@ -303,6 +303,11 @@ func claimToSchemaProperty(claim formats.ClaimDefinition, claimMappings map[stri
 				if mapping, ok := child.FormatMappings["w3c"]; ok {
 					childName = mapping
 				}
+					if mappings, ok := claimMappings["w3c"]; ok {
+						if mapped, ok := mappings[child.Name]; ok {
+							childName = mapped
+						}
+					}
 				itemSchema.Properties[childName] = claimToSchemaProperty(child, claimMappings)
 				if child.Mandatory {
 					itemSchema.Required = append(itemSchema.Required, childName)

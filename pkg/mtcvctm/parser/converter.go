@@ -181,7 +181,7 @@ func OutputFileName(baseName, formatName string) string {
 func convertChildren(children []ClaimDef, parentPath []string) []formats.ClaimDefinition {
 	result := make([]formats.ClaimDefinition, 0, len(children))
 	for _, child := range children {
-		childPath := append(append([]string{}, parentPath...), child.Name)
+		childPath := append(append([]string{}, parentPath...), strings.Split(child.Name, ".")...)
 		childDef := formats.ClaimDefinition{
 			Name:           child.Name,
 			Path:           childPath,

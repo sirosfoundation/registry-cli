@@ -268,12 +268,22 @@ func (g *Generator) imageToLogo(path, altText, sourceDir string, inline bool, cf
 // flattenClaimsVCTM recursively flattens claim definitions into the VCTM claims
 // array. For container types (object/array), both the parent claim and its children
 // are emitted with their full paths.
-func flattenClaimsVCTM(claims []formats.ClaimDefinition, out *[]map[string]interface{}, defaultLocale string) {
+func flattenClaimsVCTM(claims []formats.ClaimDefinition, out *[]map[string]interface{}, defaultLocale string, parentType ...string) {
 	for _, claim := range claims {
 		claimEntry := make(map[string]interface{})
 
-		// For array types, per SD-JWT VC spec, child paths use null for any-index
+		// Build path, inserting null for any-index if parent is an array type
 		path := toInterfacePath(claim.Path)
+		if len(parentType) > 0 && strings.EqualFold(parentType[0], "array") {
+			// Insert null before the last segment (the child name under the array)
+			if len(path) >= 2 {
+				newPath := make([]interface{}, 0, len(path)+1)
+				newPath = append(newPath, path[:len(path)-1]...)
+				newPath = append(newPath, nil) // null = all array elements
+				newPath = append(newPath, path[len(path)-1])
+				path = newPath
+			}
+		}
 		claimEntry["path"] = path
 
 		// Build display with localizations
@@ -318,7 +328,7 @@ func flattenClaimsVCTM(claims []formats.ClaimDefinition, out *[]map[string]inter
 
 		// Recurse into children
 		if len(claim.Children) > 0 {
-			flattenClaimsVCTM(claim.Children, out, defaultLocale)
+			flattenClaimsVCTM(claim.Children, out, defaultLocale, claim.Type)
 		}
 	}
 }
