@@ -181,55 +181,7 @@ func (g *Generator) Generate(parsed *formats.ParsedCredential, cfg *config.Confi
 		mddl.Claims = make(map[string]NamespaceClaims)
 		mddl.Claims[namespace] = make(NamespaceClaims)
 
-		for _, claim := range parsed.Claims {
-			// Get claim name, applying format mapping if present
-			claimName := claim.Name
-			if mapping, ok := claim.FormatMappings["mddl"]; ok {
-				claimName = mapping
-			}
-			// Also check ClaimMappings from parsed credential
-			if mappings, ok := parsed.ClaimMappings["mddl"]; ok {
-				if mapped, ok := mappings[claim.Name]; ok {
-					claimName = mapped
-				}
-			}
-
-			meta := ClaimMetadata{
-				Mandatory: claim.Mandatory,
-				ValueType: mapTypeToCDDL(claim.Type),
-			}
-
-			// Build display array
-			var displays []ClaimDisplay
-
-			// Default locale display
-			displayName := claim.DisplayName
-			if displayName == "" {
-				displayName = claim.Name
-			}
-			displays = append(displays, ClaimDisplay{
-				Locale: cfg.Language,
-				Name:   displayName,
-			})
-
-			// Additional localizations
-			for locale, loc := range claim.Localizations {
-				if locale == cfg.Language {
-					continue
-				}
-				label := loc.Label
-				if label == "" {
-					label = displayName
-				}
-				displays = append(displays, ClaimDisplay{
-					Locale: locale,
-					Name:   label,
-				})
-			}
-
-			meta.Display = displays
-			mddl.Claims[namespace][claimName] = meta
-		}
+		flattenClaimsMDOC(parsed.Claims, mddl.Claims[namespace], "", cfg.Language, parsed.ClaimMappings)
 	}
 
 	// Check for order override
@@ -264,10 +216,70 @@ func mapTypeToCDDL(mdType string) string {
 	case "image":
 		return "bstr"
 	case "object":
-		return "" // Nested structure
+		return "" // Nested structure — children are flattened
 	case "array":
-		return "" // Array type
+		return "" // Array type — children are flattened
 	default:
 		return "tstr"
+	}
+}
+
+// flattenClaimsMDOC recursively flattens claim definitions into the mDOC namespace
+// claims map. Container types (object/array) are not emitted themselves — only their
+// leaf children are emitted with dot-joined names (e.g. "address.street").
+func flattenClaimsMDOC(claims []formats.ClaimDefinition, ns NamespaceClaims, prefix string, defaultLocale string, claimMappings map[string]map[string]string) {
+	for _, claim := range claims {
+		// Get claim name, applying format mapping if present
+		claimName := claim.Name
+		if mapping, ok := claim.FormatMappings["mddl"]; ok {
+			claimName = mapping
+		}
+		if mappings, ok := claimMappings["mddl"]; ok {
+			if mapped, ok := mappings[claim.Name]; ok {
+				claimName = mapped
+			}
+		}
+
+		fullName := claimName
+		if prefix != "" {
+			fullName = prefix + "." + claimName
+		}
+
+		// If this is a container with children, recurse instead of emitting
+		if len(claim.Children) > 0 && (strings.ToLower(claim.Type) == "object" || strings.ToLower(claim.Type) == "array") {
+			flattenClaimsMDOC(claim.Children, ns, fullName, defaultLocale, claimMappings)
+			continue
+		}
+
+		meta := ClaimMetadata{
+			Mandatory: claim.Mandatory,
+			ValueType: mapTypeToCDDL(claim.Type),
+		}
+
+		// Build display array
+		var displays []ClaimDisplay
+		displayName := claim.DisplayName
+		if displayName == "" {
+			displayName = claim.Name
+		}
+		displays = append(displays, ClaimDisplay{
+			Locale: defaultLocale,
+			Name:   displayName,
+		})
+		for locale, loc := range claim.Localizations {
+			if locale == defaultLocale {
+				continue
+			}
+			label := loc.Label
+			if label == "" {
+				label = displayName
+			}
+			displays = append(displays, ClaimDisplay{
+				Locale: locale,
+				Name:   label,
+			})
+		}
+		meta.Display = displays
+		ns[fullName] = meta
 	}
 }

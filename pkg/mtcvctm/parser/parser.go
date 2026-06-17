@@ -105,6 +105,9 @@ type ClaimDef struct {
 
 	// Localizations contains locale-specific display names and descriptions
 	Localizations map[string]ClaimLocalization
+
+	// Children contains nested claim definitions for object and array types
+	Children []ClaimDef
 }
 
 // ClaimLocalization contains localized display information for a claim
@@ -238,21 +241,50 @@ func parseClaimsList(list *ast.List, content []byte, parsed *ParsedMarkdown) {
 			continue
 		}
 
-		// Look for nested list with localizations
+		// Look for nested list: may contain localizations or child claims
 		for child := listItem.FirstChild(); child != nil; child = child.NextSibling() {
 			if nestedList, ok := child.(*ast.List); ok {
-				for nestedItem := nestedList.FirstChild(); nestedItem != nil; nestedItem = nestedItem.NextSibling() {
-					if nestedListItem, ok := nestedItem.(*ast.ListItem); ok {
-						locText := extractText(nestedListItem, content)
-						if locale, loc, ok := parseLocalizationFromListItem(locText); ok {
-							claim.Localizations[locale] = loc
-						}
-					}
-				}
+				parseNestedListItems(nestedList, content, claim)
 			}
 		}
 
 		parsed.Claims[claim.Name] = *claim
+	}
+}
+
+// parseNestedListItems processes sub-list items under a parent claim.
+// If the parent claim type is "object" or "array", sub-items that match
+// the claim pattern are treated as child claim definitions. Otherwise
+// (or if they match the locale pattern) they are treated as localizations.
+func parseNestedListItems(nestedList *ast.List, content []byte, parent *ClaimDef) {
+	isContainer := parent.Type == "object" || parent.Type == "array"
+
+	for nestedItem := nestedList.FirstChild(); nestedItem != nil; nestedItem = nestedItem.NextSibling() {
+		nestedListItem, ok := nestedItem.(*ast.ListItem)
+		if !ok {
+			continue
+		}
+		locText := extractText(nestedListItem, content)
+
+		// Try localization first
+		if locale, loc, ok := parseLocalizationFromListItem(locText); ok {
+			parent.Localizations[locale] = loc
+			continue
+		}
+
+		// If the parent is a container type, try parsing as a child claim
+		if isContainer {
+			childClaim := parseClaimFromListItem(locText)
+			if childClaim != nil {
+				// Recursively process nested lists under the child claim
+				for child := nestedListItem.FirstChild(); child != nil; child = child.NextSibling() {
+					if childNestedList, ok := child.(*ast.List); ok {
+						parseNestedListItems(childNestedList, content, childClaim)
+					}
+				}
+				parent.Children = append(parent.Children, *childClaim)
+			}
+		}
 	}
 }
 

@@ -80,28 +80,7 @@ func (g *Generator) Generate(parsed *formats.ParsedCredential, cfg *config.Confi
 	// Build claims from claim definitions
 	if len(parsed.Claims) > 0 {
 		claims := make([]map[string]interface{}, 0, len(parsed.Claims))
-		for _, claim := range parsed.Claims {
-			claimEntry := make(map[string]interface{})
-			claimEntry["path"] = claim.Path
-			if claim.DisplayName != "" {
-				claimEntry["display"] = []map[string]string{
-					{"locale": "en-US", "label": claim.DisplayName},
-				}
-			}
-			if claim.Description != "" {
-				claimEntry["description"] = claim.Description
-			}
-			if claim.Mandatory {
-				claimEntry["mandatory"] = true
-			}
-			if claim.SD != "" {
-				claimEntry["sd"] = claim.SD
-			}
-			if claim.SvgId != "" {
-				claimEntry["svg_id"] = claim.SvgId
-			}
-			claims = append(claims, claimEntry)
-		}
+		flattenClaimsVCTM(parsed.Claims, &claims, cfg.Language)
 		output["claims"] = claims
 	}
 
@@ -284,4 +263,72 @@ func (g *Generator) imageToLogo(path, altText, sourceDir string, inline bool, cf
 	}
 
 	return logo, nil
+}
+
+// flattenClaimsVCTM recursively flattens claim definitions into the VCTM claims
+// array. For container types (object/array), both the parent claim and its children
+// are emitted with their full paths.
+func flattenClaimsVCTM(claims []formats.ClaimDefinition, out *[]map[string]interface{}, defaultLocale string) {
+	for _, claim := range claims {
+		claimEntry := make(map[string]interface{})
+
+		// For array types, per SD-JWT VC spec, child paths use null for any-index
+		path := toInterfacePath(claim.Path)
+		claimEntry["path"] = path
+
+		// Build display with localizations
+		var displays []map[string]string
+		if claim.DisplayName != "" {
+			displays = append(displays, map[string]string{
+				"locale": defaultLocale,
+				"label":  claim.DisplayName,
+			})
+		}
+		for locale, loc := range claim.Localizations {
+			if locale == defaultLocale {
+				continue
+			}
+			entry := map[string]string{"locale": locale}
+			if loc.Label != "" {
+				entry["label"] = loc.Label
+			}
+			if loc.Description != "" {
+				entry["description"] = loc.Description
+			}
+			displays = append(displays, entry)
+		}
+		if len(displays) > 0 {
+			claimEntry["display"] = displays
+		}
+
+		if claim.Description != "" {
+			claimEntry["description"] = claim.Description
+		}
+		if claim.Mandatory {
+			claimEntry["mandatory"] = true
+		}
+		if claim.SD != "" {
+			claimEntry["sd"] = claim.SD
+		}
+		if claim.SvgId != "" {
+			claimEntry["svg_id"] = claim.SvgId
+		}
+
+		*out = append(*out, claimEntry)
+
+		// Recurse into children
+		if len(claim.Children) > 0 {
+			flattenClaimsVCTM(claim.Children, out, defaultLocale)
+		}
+	}
+}
+
+// toInterfacePath converts a string slice path to an interface slice,
+// which is what the SD-JWT VC spec expects.
+func toInterfacePath(parts []string) []interface{} {
+	result := make([]interface{}, len(parts))
+	for i, p := range parts {
+		result[i] = p
+	}
+	return result
 }
