@@ -117,10 +117,11 @@ func convertFile(mdPath, slug, outputDir, baseURL string) (*ConvertResult, error
 
 	// Determine which formats to generate: per-credential override or all
 	var formatNames []string
-	if cred.Formats != "" {
-		formatNames, err = formats.ParseFormats(cred.Formats)
+	fmts := strings.TrimSpace(cred.Formats)
+	if fmts != "" {
+		formatNames, err = formats.ParseFormats(fmts)
 		if err != nil {
-			return nil, fmt.Errorf("parsing per-credential formats %q: %w", cred.Formats, err)
+			return nil, fmt.Errorf("parsing per-credential formats %q: %w", fmts, err)
 		}
 	} else {
 		formatNames = formats.List()

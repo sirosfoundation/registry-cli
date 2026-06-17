@@ -66,7 +66,7 @@ type ParsedCredential struct {
 
 	// Formats is an optional per-credential format override (e.g. "sd-jwt,w3c").
 	// When set, only the listed formats are generated for this credential.
-	// When empty, the global config applies.
+	// When empty, all registered formats are generated (caller decides).
 	Formats string
 }
 
