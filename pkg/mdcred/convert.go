@@ -36,7 +36,12 @@ func ConvertDir(dir, baseURL string) ([]ConvertResult, error) {
 func ConvertDirPath(dir, subPath, baseURL string) ([]ConvertResult, error) {
 	walkRoot := dir
 	if subPath != "" {
-		walkRoot = filepath.Join(dir, subPath)
+		// Clean the path and ensure it doesn't escape the repo dir
+		clean := filepath.Clean(subPath)
+		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+			return nil, fmt.Errorf("subpath must be a relative path within the repo: %q", subPath)
+		}
+		walkRoot = filepath.Join(dir, clean)
 	}
 
 	var results []ConvertResult

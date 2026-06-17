@@ -256,3 +256,18 @@ func TestConvertDirPath_EmptyPathScansAll(t *testing.T) {
 	require.Len(t, results, 1)
 	assert.Equal(t, "test", results[0].Slug)
 }
+
+func TestConvertDirPath_RejectsPathTraversal(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []string{
+		"../etc",
+		"foo/../../etc",
+		"/absolute/path",
+	}
+	for _, p := range tests {
+		_, err := ConvertDirPath(dir, p, "https://example.com")
+		assert.Error(t, err, "expected error for path %q", p)
+		assert.Contains(t, err.Error(), "relative path")
+	}
+}

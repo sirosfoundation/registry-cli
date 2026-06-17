@@ -238,6 +238,14 @@ func buildResolvers() []discovery.Resolver {
 }
 
 func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string, logger *slog.Logger) ([]*schemameta.SchemaMeta, error) {
+	// Validate repo.Path if set: must be relative, no traversal
+	if repo.Path != "" {
+		clean := filepath.Clean(repo.Path)
+		if filepath.IsAbs(clean) || strings.HasPrefix(clean, "..") {
+			return nil, fmt.Errorf("source path must be a relative path within the repo: %q", repo.Path)
+		}
+	}
+
 	// Determine org name: explicit label > URL inference
 	org := repo.Organization
 	if org == "" {
