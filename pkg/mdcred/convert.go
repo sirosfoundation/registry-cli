@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/config"
+	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats"
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/parser"
 
 	// Import format generators to trigger init() registration
@@ -114,8 +115,20 @@ func convertFile(mdPath, slug, outputDir, baseURL string) (*ConvertResult, error
 		return nil, fmt.Errorf("parsing markdown: %w", err)
 	}
 
-	// Generate all format outputs
-	outputs, err := p.GenerateAll(cred)
+	// Determine which formats to generate: per-credential override or all
+	var formatNames []string
+	fmts := strings.TrimSpace(cred.Formats)
+	if fmts != "" {
+		formatNames, err = formats.ParseFormats(fmts)
+		if err != nil {
+			return nil, fmt.Errorf("parsing per-credential formats %q: %w", fmts, err)
+		}
+	} else {
+		formatNames = formats.List()
+	}
+
+	// Generate the selected format outputs
+	outputs, err := p.Generate(cred, formatNames)
 	if err != nil {
 		return nil, fmt.Errorf("generating formats: %w", err)
 	}

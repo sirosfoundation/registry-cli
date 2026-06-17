@@ -473,3 +473,54 @@ func TestOutputFileName(t *testing.T) {
 		})
 	}
 }
+
+func TestToCredential_FormatsField(t *testing.T) {
+	cfg := &config.Config{
+		Language:  "en-US",
+		InputFile: "/test/path/test.md",
+	}
+	p := NewParser(cfg)
+
+	parsed := &ParsedMarkdown{
+		Title:       "Test",
+		Description: "Test",
+		Sections:    map[string]string{},
+		Claims:      map[string]ClaimDef{},
+		Metadata: map[string]string{
+			"vct":     "https://example.com/test",
+			"formats": "sd-jwt,w3c",
+		},
+		DisplayLocalizations: map[string]DisplayLocalization{},
+	}
+
+	cred := p.ToCredential(parsed)
+
+	if cred.Formats != "sd-jwt,w3c" {
+		t.Errorf("Formats = %q, want %q", cred.Formats, "sd-jwt,w3c")
+	}
+}
+
+func TestToCredential_FormatsFieldEmpty(t *testing.T) {
+	cfg := &config.Config{
+		Language:  "en-US",
+		InputFile: "/test/path/test.md",
+	}
+	p := NewParser(cfg)
+
+	parsed := &ParsedMarkdown{
+		Title:       "Test",
+		Description: "Test",
+		Sections:    map[string]string{},
+		Claims:      map[string]ClaimDef{},
+		Metadata: map[string]string{
+			"vct": "https://example.com/test",
+		},
+		DisplayLocalizations: map[string]DisplayLocalization{},
+	}
+
+	cred := p.ToCredential(parsed)
+
+	if cred.Formats != "" {
+		t.Errorf("Formats = %q, want empty", cred.Formats)
+	}
+}

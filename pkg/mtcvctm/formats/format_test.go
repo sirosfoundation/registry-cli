@@ -353,3 +353,73 @@ func TestParsedCredential_Fields(t *testing.T) {
 		t.Error("German localization missing")
 	}
 }
+
+func TestResolveAlias(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"sd-jwt", "vctm"},
+		{"sdjwt", "vctm"},
+		{"SD-JWT", "vctm"},
+		{"mdoc", "mddl"},
+		{"mso_mdoc", "mddl"},
+		{"w3c", "w3c"},   // not aliased, pass through
+		{"vctm", "vctm"}, // not aliased, pass through
+		{"mddl", "mddl"}, // not aliased, pass through
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := ResolveAlias(tt.input)
+			if got != tt.want {
+				t.Errorf("ResolveAlias(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseFormats_WithAliases(t *testing.T) {
+	r := NewRegistry()
+	r.Register(&mockGenerator{name: "vctm", description: "VCTM", extension: "vctm.json"})
+	r.Register(&mockGenerator{name: "mddl", description: "MDDL", extension: "mddl.json"})
+	r.Register(&mockGenerator{name: "w3c", description: "W3C", extension: "vc.json"})
+
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"sd-jwt alias", "sd-jwt", []string{"vctm"}},
+		{"sd-jwt and w3c", "sd-jwt,w3c", []string{"vctm", "w3c"}},
+		{"mdoc alias", "mdoc", []string{"mddl"}},
+		{"mixed aliases", "sd-jwt,mdoc,w3c", []string{"vctm", "mddl", "w3c"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := r.ParseFormats(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("len(got) = %d, want %d", len(got), len(tt.want))
+			}
+			for i, w := range tt.want {
+				if got[i] != w {
+					t.Errorf("got[%d] = %q, want %q", i, got[i], w)
+				}
+			}
+		})
+	}
+}
+
+func TestParsedCredential_Formats(t *testing.T) {
+	cred := &ParsedCredential{
+		ID:      "test",
+		Formats: "sd-jwt,w3c",
+	}
+	if cred.Formats != "sd-jwt,w3c" {
+		t.Errorf("Formats = %q, want %q", cred.Formats, "sd-jwt,w3c")
+	}
+}

@@ -46,6 +46,8 @@ func (p *Parser) ToCredential(parsed *ParsedMarkdown) *formats.ParsedCredential 
 			cred.DocType = v
 		case "namespace":
 			cred.Namespace = v
+		case "formats":
+			cred.Formats = v
 		case "background_color":
 			cred.BackgroundColor = strings.Trim(v, "\"")
 		case "text_color":

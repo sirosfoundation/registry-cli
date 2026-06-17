@@ -63,6 +63,11 @@ type ParsedCredential struct {
 
 	// Raw metadata from front matter
 	Metadata map[string]interface{}
+
+	// Formats is an optional per-credential format override (e.g. "sd-jwt,w3c").
+	// When set, only the listed formats are generated for this credential.
+	// When empty, all registered formats are generated (caller decides).
+	Formats string
 }
 
 // DisplayLocalization contains localized display properties
@@ -202,6 +207,7 @@ func (r *Registry) ParseFormats(formatStr string) ([]string, error) {
 		if name == "" {
 			continue
 		}
+		name = ResolveAlias(name)
 		if _, ok := r.Get(name); !ok {
 			return nil, fmt.Errorf("unknown format: %s (available: %s)", name, strings.Join(r.List(), ", "))
 		}
@@ -241,4 +247,21 @@ func ParseFormats(formatStr string) ([]string, error) {
 // FormatJSON is a helper to marshal data as indented JSON
 func FormatJSON(data interface{}) ([]byte, error) {
 	return json.MarshalIndent(data, "", "  ")
+}
+
+// formatAliases maps user-friendly format names to internal registry names
+var formatAliases = map[string]string{
+	"sd-jwt": "vctm",
+	"sdjwt":  "vctm",
+	"mdoc":   "mddl",
+	"mso_mdoc": "mddl",
+}
+
+// ResolveAlias maps a user-facing format name to its internal registry name.
+// If no alias is defined the input is returned unchanged.
+func ResolveAlias(name string) string {
+	if alias, ok := formatAliases[strings.ToLower(name)]; ok {
+		return alias
+	}
+	return name
 }
