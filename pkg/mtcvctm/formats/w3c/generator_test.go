@@ -6,6 +6,7 @@ import (
 
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/config"
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats"
+	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats/schema"
 )
 
 func TestNewGenerator(t *testing.T) {
@@ -439,7 +440,7 @@ func TestMapTypeToJSONSchema(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			prop := mapTypeToJSONSchema(tt.input)
+			prop := schema.MapType(tt.input)
 			if prop.Type != tt.wantType {
 				t.Errorf("Type = %q, want %q", prop.Type, tt.wantType)
 			}
@@ -451,14 +452,14 @@ func TestMapTypeToJSONSchema(t *testing.T) {
 }
 
 func TestMapTypeToJSONSchema_ImageEncoding(t *testing.T) {
-	prop := mapTypeToJSONSchema("image")
+	prop := schema.MapType("image")
 	if prop.ContentEncoding != "base64" {
 		t.Errorf("ContentEncoding = %q, want 'base64'", prop.ContentEncoding)
 	}
 }
 
 func TestMapTypeToJSONSchema_ArrayItems(t *testing.T) {
-	prop := mapTypeToJSONSchema("array")
+	prop := schema.MapType("array")
 	if prop.Items == nil {
 		t.Fatal("Items should not be nil for array type")
 	}
