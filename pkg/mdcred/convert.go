@@ -29,9 +29,25 @@ type ConvertResult struct {
 // credentials. Already-existing output files are skipped (the repo may have
 // pre-built them).
 func ConvertDir(dir, baseURL string) ([]ConvertResult, error) {
+	return ConvertDirPath(dir, "", baseURL)
+}
+
+// ConvertDirPath works like ConvertDir but restricts discovery to the given
+// relative subPath within dir. If subPath is empty, the entire dir is scanned.
+func ConvertDirPath(dir, subPath, baseURL string) ([]ConvertResult, error) {
+	walkRoot := dir
+	if subPath != "" {
+		// Clean the path and ensure it doesn't escape the repo dir
+		clean := filepath.Clean(subPath)
+		if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || containsDotDot(clean) {
+			return nil, fmt.Errorf("subpath must be a relative path within the repo: %q", subPath)
+		}
+		walkRoot = filepath.Join(dir, clean)
+	}
+
 	var results []ConvertResult
 
-	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(walkRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -147,4 +163,14 @@ func convertFile(mdPath, slug, outputDir, baseURL string) (*ConvertResult, error
 	}
 
 	return result, nil
+}
+
+// containsDotDot reports whether the cleaned path contains ".." as a segment.
+func containsDotDot(p string) bool {
+	for _, seg := range strings.Split(p, string(filepath.Separator)) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }

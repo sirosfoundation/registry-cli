@@ -224,3 +224,63 @@ func TestConvertFile_InvalidMarkdown(t *testing.T) {
 		assert.NotNil(t, result)
 	}
 }
+
+func TestConvertDirPath_RestrictsToSubfolder(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a credential in root (should NOT be found when path is set)
+	rootMD := "---\nvct: https://example.com/root\n---\n# Root Credential\n\n## Claims\n\n- `id` (string): ID\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "root.md"), []byte(rootMD), 0o644))
+
+	// Create a credential in credentials/ (should be found)
+	subDir := filepath.Join(dir, "credentials")
+	require.NoError(t, os.MkdirAll(subDir, 0o755))
+	subMD := "---\nvct: https://example.com/sub\n---\n# Sub Credential\n\n## Claims\n\n- `name` (string): Name\n"
+	require.NoError(t, os.WriteFile(filepath.Join(subDir, "sub.md"), []byte(subMD), 0o644))
+
+	// With path restriction, only the subfolder credential should be found
+	results, err := ConvertDirPath(dir, "credentials", "https://example.com")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "sub", results[0].Slug)
+}
+
+func TestConvertDirPath_EmptyPathScansAll(t *testing.T) {
+	dir := t.TempDir()
+
+	md := "---\nvct: https://example.com/test\n---\n# Test\n\n## Claims\n\n- `id` (string): ID\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.md"), []byte(md), 0o644))
+
+	results, err := ConvertDirPath(dir, "", "https://example.com")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "test", results[0].Slug)
+}
+
+func TestConvertDirPath_RejectsPathTraversal(t *testing.T) {
+	dir := t.TempDir()
+
+	tests := []string{
+		"../etc",
+		"foo/../../etc",
+		"/absolute/path",
+	}
+	for _, p := range tests {
+		_, err := ConvertDirPath(dir, p, "https://example.com")
+		assert.Error(t, err, "expected error for path %q", p)
+		assert.Contains(t, err.Error(), "relative path")
+	}
+}
+
+func TestConvertDirPath_AllowsDotPrefixedDirs(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a ..cache directory (valid, not traversal)
+	cacheDir := filepath.Join(dir, "..cache")
+	require.NoError(t, os.MkdirAll(cacheDir, 0o755))
+
+	// Should not error (even though no .md files exist)
+	results, err := ConvertDirPath(dir, "..cache", "https://example.com")
+	require.NoError(t, err)
+	assert.Len(t, results, 0)
+}

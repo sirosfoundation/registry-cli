@@ -238,6 +238,14 @@ func buildResolvers() []discovery.Resolver {
 }
 
 func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string, logger *slog.Logger) ([]*schemameta.SchemaMeta, error) {
+	// Validate repo.Path if set: must be relative, no traversal
+	if repo.Path != "" {
+		clean := filepath.Clean(repo.Path)
+		if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || containsDotDot(clean) {
+			return nil, fmt.Errorf("source path must be a relative path within the repo: %q", repo.Path)
+		}
+	}
+
 	// Determine org name: explicit label > URL inference
 	org := repo.Organization
 	if org == "" {
@@ -266,7 +274,7 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 	}
 
 	// Pass 0: convert markdown credential files to VCTM format files
-	converted, err := mdcred.ConvertDir(repoDir, baseURL)
+	converted, err := mdcred.ConvertDirPath(repoDir, repo.Path, baseURL)
 	if err != nil {
 		logger.Warn("markdown credential conversion", "error", err)
 	}
@@ -278,8 +286,14 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 	var schemas []*schemameta.SchemaMeta
 	knownSlugs := make(map[string]bool)
 
+	// Determine walk root: restrict to repo.Path if set
+	schemaWalkRoot := repoDir
+	if repo.Path != "" {
+		schemaWalkRoot = filepath.Join(repoDir, repo.Path)
+	}
+
 	// First pass: find schema-meta files (TS11 credentials)
-	if walkErr := filepath.WalkDir(repoDir, func(path string, d os.DirEntry, err error) error {
+	if walkErr := filepath.WalkDir(schemaWalkRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -343,7 +357,11 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 
 	// Second pass: discover legacy VCTM-only credentials (no schema-meta)
 	// Walk subdirectories as well
-	legacyCreds, err := schemameta.DetectLegacyCredentials(repoDir, knownSlugs)
+	legacyWalkRoot := repoDir
+	if repo.Path != "" {
+		legacyWalkRoot = filepath.Join(repoDir, repo.Path)
+	}
+	legacyCreds, err := schemameta.DetectLegacyCredentials(legacyWalkRoot, knownSlugs)
 	if err != nil {
 		logger.Warn("detecting legacy credentials", "error", err)
 	}
@@ -1092,4 +1110,14 @@ func attrFilename(id string) string {
 	// Replace colons with underscores (not dashes) to avoid collision between
 	// "a:b-c" and "a-b:c" which would both become "a-b-c" with dash replacement.
 	return strings.ReplaceAll(s, ":", "_")
+}
+
+// containsDotDot reports whether the cleaned path contains ".." as a segment.
+func containsDotDot(p string) bool {
+	for _, seg := range strings.Split(p, string(filepath.Separator)) {
+		if seg == ".." {
+			return true
+		}
+	}
+	return false
 }

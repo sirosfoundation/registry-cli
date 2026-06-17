@@ -3,6 +3,7 @@ package discovery
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -417,4 +418,110 @@ func TestResolveAll_FileURL_RelativePathRejected(t *testing.T) {
 	_, err := ResolveAll(m, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "absolute path")
+}
+
+func TestSourceEntry_PathField(t *testing.T) {
+	content := `url: "git:https://github.com/org/repo.git"
+organization: "MyOrg"
+branch: main
+path: credentials/
+`
+	var entry SourceEntry
+	err := yaml.Unmarshal([]byte(content), &entry)
+	require.NoError(t, err)
+	assert.Equal(t, "git:https://github.com/org/repo.git", entry.URL)
+	assert.Equal(t, "credentials/", entry.Path)
+}
+
+func TestResolveAll_PathPropagated(t *testing.T) {
+	m := &SourceManifest{
+		Sources: []SourceEntry{
+			{
+				URL:  "git:https://github.com/org/repo.git",
+				Path: "data/credentials",
+			},
+		},
+		Defaults: SourceDefaults{Branch: "main"},
+	}
+
+	repos, err := ResolveAll(m, nil)
+	require.NoError(t, err)
+	require.Len(t, repos, 1)
+	assert.Equal(t, "data/credentials", repos[0].Path)
+}
+
+func TestResolveAll_PathPropagatedForLocal(t *testing.T) {
+	m := &SourceManifest{
+		Sources: []SourceEntry{
+			{
+				URL:  "file:///tmp/my-repo",
+				Path: "schemas/vctm",
+			},
+		},
+	}
+
+	repos, err := ResolveAll(m, nil)
+	require.NoError(t, err)
+	require.Len(t, repos, 1)
+	assert.Equal(t, "schemas/vctm", repos[0].Path)
+}
+
+func TestLoadManifest_WithPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sources.yaml")
+
+	content := `sources:
+  - url: "git:https://github.com/webuild-consortium/rulebooks-catalog.git"
+    branch: main
+    path: credentials/
+defaults:
+  branch: main
+`
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	m, err := LoadManifest(path)
+	require.NoError(t, err)
+	assert.Equal(t, "credentials/", m.Sources[0].Path)
+}
+
+func TestResolveAll_PathPropagatedForMetaSource(t *testing.T) {
+	// Mock resolver that returns a single repo
+	mockResolver := &mockMetaResolver{
+		handles: func(s string) bool { return strings.HasPrefix(s, "mock:") },
+		resolve: func(s string) ([]ResolvedRepo, error) {
+			return []ResolvedRepo{
+				{URL: "https://github.com/org/repo.git"},
+			}, nil
+		},
+	}
+
+	m := &SourceManifest{
+		Sources: []SourceEntry{
+			{
+				URL:  "mock:something",
+				Path: "credentials/v1",
+			},
+		},
+		Defaults: SourceDefaults{Branch: "main"},
+	}
+
+	repos, err := ResolveAll(m, []Resolver{mockResolver})
+	require.NoError(t, err)
+	require.Len(t, repos, 1)
+	assert.Equal(t, "credentials/v1", repos[0].Path)
+	assert.Equal(t, "main", repos[0].Branch)
+}
+
+// mockMetaResolver implements Resolver for testing
+type mockMetaResolver struct {
+	handles func(string) bool
+	resolve func(string) ([]ResolvedRepo, error)
+}
+
+func (m *mockMetaResolver) Handles(source string) bool {
+	return m.handles(source)
+}
+
+func (m *mockMetaResolver) Resolve(source string) ([]ResolvedRepo, error) {
+	return m.resolve(source)
 }
