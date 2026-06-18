@@ -165,9 +165,9 @@ type CredentialSchema struct {
 
 // CredentialSubjectSchema represents the credentialSubject part of the schema
 type CredentialSubjectSchema struct {
-	Type       string                      `json:"type"`
+	Type       string                          `json:"type"`
 	Properties map[string]*jsonschema.Property `json:"properties,omitempty"`
-	Required   []string                    `json:"required,omitempty"`
+	Required   []string                        `json:"required,omitempty"`
 }
 
 // Generate produces the W3C VC schema output

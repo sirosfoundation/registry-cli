@@ -22,8 +22,10 @@ func NewGenerator() *Generator {
 	return &Generator{}
 }
 
-func (g *Generator) Name() string        { return "jsonschema" }
-func (g *Generator) Description() string  { return "Standalone JSON Schema (draft-07) for credential payload validation" }
+func (g *Generator) Name() string { return "jsonschema" }
+func (g *Generator) Description() string {
+	return "Standalone JSON Schema (draft-07) for credential payload validation"
+}
 func (g *Generator) FileExtension() string { return "schema.json" }
 
 func (g *Generator) DeriveIdentifier(parsed *formats.ParsedCredential, cfg *config.Config) string {
@@ -35,13 +37,13 @@ func (g *Generator) DeriveIdentifier(parsed *formats.ParsedCredential, cfg *conf
 
 // JSONSchema represents a standalone JSON Schema document.
 type JSONSchema struct {
-	Schema      string                  `json:"$schema"`
-	ID          string                  `json:"$id,omitempty"`
-	Title       string                  `json:"title,omitempty"`
-	Description string                  `json:"description,omitempty"`
-	Type        string                  `json:"type"`
+	Schema      string                      `json:"$schema"`
+	ID          string                      `json:"$id,omitempty"`
+	Title       string                      `json:"title,omitempty"`
+	Description string                      `json:"description,omitempty"`
+	Type        string                      `json:"type"`
 	Properties  map[string]*schema.Property `json:"properties,omitempty"`
-	Required    []string                `json:"required,omitempty"`
+	Required    []string                    `json:"required,omitempty"`
 }
 
 func (g *Generator) Generate(parsed *formats.ParsedCredential, cfg *config.Config) ([]byte, error) {
