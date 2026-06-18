@@ -8,11 +8,15 @@ import (
 
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/config"
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats"
+	jsonschema "github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats/schema"
 )
 
 func init() {
 	formats.Register(NewGenerator())
 }
+
+// schemaFormatName is the format name used for claim mapping lookups.
+const schemaFormatName = "w3c"
 
 // Generator implements the W3C VC format generator
 type Generator struct{}
@@ -159,28 +163,16 @@ type CredentialSchema struct {
 	Properties map[string]interface{} `json:"properties,omitempty"`
 }
 
-// SchemaProperty represents a JSON Schema property
-type SchemaProperty struct {
-	Type            string                     `json:"type"`
-	Title           string                     `json:"title,omitempty"`
-	Description     string                     `json:"description,omitempty"`
-	Format          string                     `json:"format,omitempty"`
-	ContentEncoding string                     `json:"contentEncoding,omitempty"`
-	Items           *SchemaProperty            `json:"items,omitempty"`
-	Properties      map[string]*SchemaProperty `json:"properties,omitempty"`
-	Required        []string                   `json:"required,omitempty"`
-}
-
 // CredentialSubjectSchema represents the credentialSubject part of the schema
 type CredentialSubjectSchema struct {
-	Type       string                     `json:"type"`
-	Properties map[string]*SchemaProperty `json:"properties,omitempty"`
-	Required   []string                   `json:"required,omitempty"`
+	Type       string                          `json:"type"`
+	Properties map[string]*jsonschema.Property `json:"properties,omitempty"`
+	Required   []string                        `json:"required,omitempty"`
 }
 
 // Generate produces the W3C VC schema output
 func (g *Generator) Generate(parsed *formats.ParsedCredential, cfg *config.Config) ([]byte, error) {
-	schema := &W3CCredentialSchema{
+	output := &W3CCredentialSchema{
 		Type:        g.deriveTypes(parsed, cfg),
 		Context:     g.deriveContext(parsed, cfg),
 		Name:        parsed.Name,
@@ -189,7 +181,7 @@ func (g *Generator) Generate(parsed *formats.ParsedCredential, cfg *config.Confi
 
 	// Add display properties
 	if parsed.BackgroundColor != "" || parsed.TextColor != "" {
-		schema.Display = &DisplayProperties{
+		output.Display = &DisplayProperties{
 			BackgroundColor: parsed.BackgroundColor,
 			TextColor:       parsed.TextColor,
 		}
@@ -197,33 +189,14 @@ func (g *Generator) Generate(parsed *formats.ParsedCredential, cfg *config.Confi
 
 	// Build credential schema
 	if len(parsed.Claims) > 0 {
+		props, required := jsonschema.BuildProperties(parsed.Claims, parsed.ClaimMappings, schemaFormatName)
 		credSubject := &CredentialSubjectSchema{
 			Type:       "object",
-			Properties: make(map[string]*SchemaProperty),
+			Properties: props,
+			Required:   required,
 		}
 
-		for _, claim := range parsed.Claims {
-			// Get claim name, applying format mapping if present
-			claimName := claim.Name
-			if mapping, ok := claim.FormatMappings["w3c"]; ok {
-				claimName = mapping
-			}
-			// Also check ClaimMappings from parsed credential
-			if mappings, ok := parsed.ClaimMappings["w3c"]; ok {
-				if mapped, ok := mappings[claim.Name]; ok {
-					claimName = mapped
-				}
-			}
-
-			prop := claimToSchemaProperty(claim, parsed.ClaimMappings)
-			credSubject.Properties[claimName] = prop
-
-			if claim.Mandatory {
-				credSubject.Required = append(credSubject.Required, claimName)
-			}
-		}
-
-		schema.CredentialSchema = &CredentialSchema{
+		output.CredentialSchema = &CredentialSchema{
 			Type: "JsonSchema",
 			Properties: map[string]interface{}{
 				"credentialSubject": credSubject,
@@ -231,91 +204,5 @@ func (g *Generator) Generate(parsed *formats.ParsedCredential, cfg *config.Confi
 		}
 	}
 
-	return json.MarshalIndent(schema, "", "  ")
-}
-
-// mapTypeToJSONSchema maps markdown types to JSON Schema properties
-func mapTypeToJSONSchema(mdType string) *SchemaProperty {
-	switch strings.ToLower(mdType) {
-	case "string":
-		return &SchemaProperty{Type: "string"}
-	case "number":
-		return &SchemaProperty{Type: "number"}
-	case "integer":
-		return &SchemaProperty{Type: "integer"}
-	case "boolean", "bool":
-		return &SchemaProperty{Type: "boolean"}
-	case "date":
-		return &SchemaProperty{Type: "string", Format: "date"}
-	case "datetime":
-		return &SchemaProperty{Type: "string", Format: "date-time"}
-	case "image":
-		return &SchemaProperty{Type: "string", ContentEncoding: "base64"}
-	case "object":
-		return &SchemaProperty{Type: "object", Properties: make(map[string]*SchemaProperty)}
-	case "array":
-		return &SchemaProperty{Type: "array", Items: &SchemaProperty{Type: "string"}}
-	default:
-		return &SchemaProperty{Type: "string"}
-	}
-}
-
-// claimToSchemaProperty converts a ClaimDefinition to a JSON Schema property,
-// recursively building nested properties for object and array types.
-func claimToSchemaProperty(claim formats.ClaimDefinition, claimMappings map[string]map[string]string) *SchemaProperty {
-	prop := mapTypeToJSONSchema(claim.Type)
-	prop.Title = claim.DisplayName
-	if prop.Title == "" {
-		prop.Title = claim.Name
-	}
-	prop.Description = claim.Description
-
-	// Build nested properties from children
-	if len(claim.Children) > 0 {
-		switch strings.ToLower(claim.Type) {
-		case "object":
-			if prop.Properties == nil {
-				prop.Properties = make(map[string]*SchemaProperty)
-			}
-			for _, child := range claim.Children {
-				childName := child.Name
-				if mapping, ok := child.FormatMappings["w3c"]; ok {
-					childName = mapping
-				}
-				if mappings, ok := claimMappings["w3c"]; ok {
-					if mapped, ok := mappings[child.Name]; ok {
-						childName = mapped
-					}
-				}
-				prop.Properties[childName] = claimToSchemaProperty(child, claimMappings)
-				if child.Mandatory {
-					prop.Required = append(prop.Required, childName)
-				}
-			}
-		case "array":
-			// Array items: build an object schema from children
-			itemSchema := &SchemaProperty{
-				Type:       "object",
-				Properties: make(map[string]*SchemaProperty),
-			}
-			for _, child := range claim.Children {
-				childName := child.Name
-				if mapping, ok := child.FormatMappings["w3c"]; ok {
-					childName = mapping
-				}
-					if mappings, ok := claimMappings["w3c"]; ok {
-						if mapped, ok := mappings[child.Name]; ok {
-							childName = mapped
-						}
-					}
-				itemSchema.Properties[childName] = claimToSchemaProperty(child, claimMappings)
-				if child.Mandatory {
-					itemSchema.Required = append(itemSchema.Required, childName)
-				}
-			}
-			prop.Items = itemSchema
-		}
-	}
-
-	return prop
+	return json.MarshalIndent(output, "", "  ")
 }

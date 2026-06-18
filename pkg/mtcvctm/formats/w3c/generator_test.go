@@ -417,56 +417,6 @@ func TestGenerator_Generate_WithClaimMappings(t *testing.T) {
 	}
 }
 
-func TestMapTypeToJSONSchema(t *testing.T) {
-	tests := []struct {
-		input    string
-		wantType string
-		wantFmt  string
-	}{
-		{"string", "string", ""},
-		{"STRING", "string", ""},
-		{"number", "number", ""},
-		{"integer", "integer", ""},
-		{"boolean", "boolean", ""},
-		{"bool", "boolean", ""},
-		{"date", "string", "date"},
-		{"datetime", "string", "date-time"},
-		{"image", "string", ""}, // has contentEncoding
-		{"object", "object", ""},
-		{"array", "array", ""},
-		{"unknown", "string", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			prop := mapTypeToJSONSchema(tt.input)
-			if prop.Type != tt.wantType {
-				t.Errorf("Type = %q, want %q", prop.Type, tt.wantType)
-			}
-			if prop.Format != tt.wantFmt {
-				t.Errorf("Format = %q, want %q", prop.Format, tt.wantFmt)
-			}
-		})
-	}
-}
-
-func TestMapTypeToJSONSchema_ImageEncoding(t *testing.T) {
-	prop := mapTypeToJSONSchema("image")
-	if prop.ContentEncoding != "base64" {
-		t.Errorf("ContentEncoding = %q, want 'base64'", prop.ContentEncoding)
-	}
-}
-
-func TestMapTypeToJSONSchema_ArrayItems(t *testing.T) {
-	prop := mapTypeToJSONSchema("array")
-	if prop.Items == nil {
-		t.Fatal("Items should not be nil for array type")
-	}
-	if prop.Items.Type != "string" {
-		t.Errorf("Items.Type = %q, want 'string'", prop.Items.Type)
-	}
-}
-
 func contains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

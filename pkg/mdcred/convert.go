@@ -12,6 +12,7 @@ import (
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/parser"
 
 	// Import format generators to trigger init() registration
+	_ "github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats/jsonschema"
 	_ "github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats/mddl"
 	_ "github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats/vctmfmt"
 	_ "github.com/sirosfoundation/registry-cli/pkg/mtcvctm/formats/w3c"

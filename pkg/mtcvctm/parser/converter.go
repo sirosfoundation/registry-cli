@@ -97,7 +97,6 @@ func (p *Parser) ToCredential(parsed *ParsedMarkdown) *formats.ParsedCredential 
 			}
 		}
 
-
 		// Convert children recursively
 		if len(claim.Children) > 0 {
 			claimDef.Children = convertChildren(claim.Children, parts)

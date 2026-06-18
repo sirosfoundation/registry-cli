@@ -254,10 +254,12 @@ func FormatJSON(data interface{}) ([]byte, error) {
 
 // formatAliases maps user-friendly format names to internal registry names
 var formatAliases = map[string]string{
-	"sd-jwt": "vctm",
-	"sdjwt":  "vctm",
-	"mdoc":   "mddl",
-	"mso_mdoc": "mddl",
+	"sd-jwt":      "vctm",
+	"sdjwt":       "vctm",
+	"mdoc":        "mddl",
+	"mso_mdoc":    "mddl",
+	"json-schema": "jsonschema",
+	"schema":      "jsonschema",
 }
 
 // ResolveAlias maps a user-facing format name to its internal registry name.
