@@ -100,6 +100,19 @@ These are discovered automatically from the vctm branch of each repository.
 | `pkg/ts11compliance` | TS11 specification compliance test suite |
 | `pkg/mdcred` | Markdown-based credential conversion |
 
+## Output Formats
+
+`registry-cli convert` transforms Markdown credential definitions into the following formats:
+
+| Format | Aliases | Output file | Description |
+|--------|---------|-------------|-------------|
+| `vctm` | `sd-jwt`, `sdjwt` | `.vctm.json` | SD-JWT VC Type Metadata |
+| `mddl` | `mdoc`, `mso_mdoc` | `.mdoc.json` | mDOC MDDL (ISO 18013-5) |
+| `w3c` | `jwt_vc_json` | `.vc.json` | W3C VCDM 2.0 credential schema |
+| `jsonschema` | `json-schema`, `schema` | `.schema.json` | Standalone JSON Schema (draft-07) |
+
+By default all formats are generated. Use `--format` or `formats:` front matter to select specific formats.
+
 ## Serve (development)
 
 ```sh
