@@ -343,7 +343,7 @@ func SanitizeSVG(svgContent []byte) template.HTML {
 	//
 	// If inline SVG support is needed in future, use a dedicated SVG sanitization
 	// library (e.g., github.com/RobotsAndPencils/go-svg) rather than general HTML sanitization.
-	
+
 	// For now, return empty to indicate SVG was blocked
 	return ""
 }
