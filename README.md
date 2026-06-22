@@ -75,18 +75,89 @@ Source entries can be plain strings or structs with `url` and optional
 `organization` fields. Local (`file://`) sources default to organization
 "Local" if no label is provided.
 
-## Schema-meta
+## Schema-meta: TS11 Governance Metadata
 
-Each credential can have a co-located `.schema-meta.yaml` file providing
-TS11 metadata:
+Each credential must have a co-located `.schema-meta.yaml` file (or `.schema-meta.json`) providing TS11 **Catalogue of Attestations** compliance metadata. Only **two fields are required**; all others are inferred automatically.
+
+### Required Fields
+
+| Field | Values | Description |
+|-------|--------|-------------|
+| `attestation_los` | `iso_18045_high`, `iso_18045_moderate`, `iso_18045_enhanced-basic`, `iso_18045_basic` | Attestation Level of Surety per ISO 18045. Friendly aliases (`high`, `moderate`, `enhanced-basic`, `basic`, `substantial`, `low`) are normalized automatically. |
+| `binding_type` | `key`, `biometric`, `claim`, `none` | How the credential is bound to the holder. Friendly aliases (`cnf` → `key`, `holder` → `key`) are normalized. |
+
+### Optional Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `version` | string | `"0.1.0"` | Schema version (semver). Can also be derived from git tags. |
+| `rulebook_uri` | string | *(auto-generated)* | URL to attestation rulebook. If omitted, registry-cli auto-detects from co-located `rulebook.md`. |
+| `trusted_authorities` | array | *(empty)* | Trust framework references per TS11 §4.3.3. See [Trusted Authorities](#trusted-authorities) below. |
+
+### Auto-Generated Fields (do NOT set these)
+
+The following fields are inferred automatically at build time:
+
+| Field | Source |
+|-------|--------|
+| `id` | UUID v5 deterministically derived from `org/slug` |
+| `supportedFormats` | Detected from co-located files: `.vctm.json` → `dc+sd-jwt`, `.mdoc.json` → `mso_mdoc`, `.vc.json` → `jwt_vc_json` |
+| `schemaURIs` | Generated from `supportedFormats` and registry base URL |
+
+### Minimal Example
 
 ```yaml
-attestation_los: substantial
-binding_type: cnf
-version: "1.0"
+attestation_los: iso_18045_high
+binding_type: key
 ```
 
-These are discovered automatically from the vctm branch of each repository.
+### Full Example
+
+```yaml
+attestation_los: iso_18045_high
+binding_type: key
+version: "1.0.0"
+rulebook_uri: https://example.com/credentials/my-credential/rulebook
+trusted_authorities:
+  - framework_type: etsi_tl
+    value: "https://tl.etsi.org/export/trustlist.xml"
+    is_lote: false
+  - framework_type: eidas
+    value: "https://eidas.ec.europa.eu"
+    is_lote: false
+    trust_mark_id: "https://eidas.ec.europa.eu/markers/high"
+    trust_mark_issuers:
+      - "https://issuer.example.com"
+```
+
+### Trusted Authorities
+
+Trusted authority entries define governance frameworks and trust marks:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `framework_type` | string | Yes | Identifier for the trust framework (e.g., `etsi_tl`, `eidas`, `custom-scheme`) |
+| `value` | string | Yes | Trust list URL or authority endpoint |
+| `is_lote` | boolean | No | Whether this is a List of Trusted Entities (LOTE) |
+| `trust_mark_id` | string | No | URI identifying the trust mark |
+| `trust_mark_issuers` | array of strings | No | URLs of entities authorized to issue this trust mark |
+
+### File Placement
+
+Place the `.schema-meta.yaml` file in the same directory and with the same base name as your credential files:
+
+```
+credentials/
+├── my-credential.md              (markdown source)
+├── my-credential.schema-meta.yaml (TS11 metadata)
+├── my-credential.vctm.json       (auto-generated or pre-built)
+├── my-credential.mdoc.json       (auto-generated or pre-built)
+└── my-credential.vc.json         (auto-generated or pre-built)
+```
+
+### Publishing Without Schema-Meta
+
+Credentials discovered without a `.schema-meta.yaml` file appear in the **human-readable site** but are **excluded** from TS11 API responses (`/api/v1/schemas.json`). This allows incremental migration to TS11 compliance.
 
 ## Packages
 
