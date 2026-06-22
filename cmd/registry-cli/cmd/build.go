@@ -712,6 +712,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 				if jsonErr := json.Unmarshal(data, &vctm); jsonErr != nil {
 					logger.Warn("invalid VCTM JSON", "file", vctmPath, "error", jsonErr)
 				} else {
+					render.SanitizeVCTM(&vctm)
 					cred.VCTM = &vctm
 				}
 			} else {
@@ -723,6 +724,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 					if jsonErr := json.Unmarshal(data, &vctm); jsonErr != nil {
 						logger.Warn("invalid VCTM JSON", "file", bareVCTMPath, "error", jsonErr)
 					} else {
+						render.SanitizeVCTM(&vctm)
 						cred.VCTM = &vctm
 					}
 				} else {
@@ -734,6 +736,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 						if jsonErr := json.Unmarshal(data, &vctm); jsonErr != nil {
 							logger.Warn("invalid VCTM JSON", "file", bareJSONPath, "error", jsonErr)
 						} else {
+							render.SanitizeVCTM(&vctm)
 							cred.VCTM = &vctm
 						}
 					}

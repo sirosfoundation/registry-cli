@@ -201,6 +201,93 @@ docker build -t registry-cli:latest .
 docker run -p 8080:8080 -v ./sources:/data/sources:ro registry-cli:latest
 ```
 
+## Security
+
+### Markdown and Content Sanitization
+
+`registry-cli` processes potentially untrusted content from external credential repositories (rulebooks, VCTM metadata). All user-generated content is sanitized to prevent XSS attacks:
+
+#### Rulebook Markdown Sanitization
+
+Attestation rulebooks are converted from Markdown to HTML and sanitized using a strict content security policy:
+
+**Allowed elements:** paragraphs, headings, bold, italic, links, tables, lists, code blocks, blockquotes
+
+**Blocked elements:** script tags, objects, embeds, SVGs, style tags, iframe, form
+
+**Blocked attributes:** event handlers (onclick, onerror, etc.), style attributes, javascript: URIs, data: URIs
+
+Example attack prevention:
+```markdown
+<!-- Blocked: scripts are stripped -->
+<script>alert('xss')</script>
+
+<!-- Blocked: event handlers are removed -->
+<img src=x onerror="alert(1)">
+
+<!-- Blocked: style attributes prevent CSS injection -->
+<p style="position:fixed;...">Overlay</p>
+
+<!-- Blocked: javascript: URIs are filtered -->
+[Click me](javascript:alert(1))
+
+<!-- Allowed: safe links are preserved -->
+[Documentation](https://example.com/docs)
+```
+
+#### SVG and Image URI Validation
+
+Credential metadata (VCTM) may reference images for logos and backgrounds:
+
+- **Allowed:** `https://` and `http://` URIs pointing to external image files
+- **Blocked:** `data:` URIs (inline data), `blob:` URIs, `javascript:` protocols, `file://` URIs
+
+Invalid image URIs are silently removed from rendered credential pages. The implementation is in `pkg/render/vctm.go::SanitizeVCTM()`.
+
+#### Testing
+
+Comprehensive security tests verify sanitization effectiveness:
+
+```bash
+go test ./pkg/render -run "Sanitize" -v
+```
+
+Tests cover:
+- XSS via script tags and event handlers
+- CSS injection via style attributes
+- SVG and object attacks
+- Data URI attacks
+- JavaScript protocol handlers
+- Safe content preservation (links, tables, lists)
+
+### Recommendations for Repository Maintainers
+
+When publishing credentials with rulebooks:
+
+1. **Avoid HTML in Markdown:** Write rulebooks using standard Markdown syntax
+2. **Don't embed SVGs:** Reference SVGs via URLs only, never inline
+3. **Use safe links:** Only use `https://` links to trusted documentation
+4. **No styling:** Don't use HTML style attributes or CSS; format using Markdown
+5. **No JavaScript:** Avoid any JavaScript references or data URIs
+
+Example safe rulebook structure:
+```markdown
+# PID Attestation Rulebook
+
+## Overview
+This rulebook governs Personal ID credentials.
+
+- [Framework documentation](https://example.com/pid-framework)
+- [Technical specifications](https://example.com/pid-spec)
+
+## Requirements
+- Attestation LoS: high
+- Binding type: key
+
+## See also
+- [PID Rulebook v1.5](https://example.com/pid-rulebook-1.5)
+```
+
 ## Testing
 
 ```sh
