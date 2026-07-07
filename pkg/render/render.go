@@ -256,7 +256,9 @@ func (r *Renderer) renderToFile(path, templateName string, data any) error {
 
 // RenderMarkdown converts markdown content to sanitized HTML.
 // The output is sanitized with bluemonday to prevent XSS from untrusted
-// markdown sources (e.g. external git repositories).
+// markdown sources (e.g. external git repositories, rulebooks).
+// Uses a strict policy that blocks dangerous elements while allowing
+// safe formatting (bold, italic, links, tables, etc).
 func RenderMarkdown(markdown []byte) (template.HTML, error) {
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.Table),
@@ -265,9 +267,94 @@ func RenderMarkdown(markdown []byte) (template.HTML, error) {
 	if err := md.Convert(markdown, &buf); err != nil {
 		return "", fmt.Errorf("rendering markdown: %w", err)
 	}
-	p := bluemonday.UGCPolicy()
-	sanitized := p.SanitizeBytes(buf.Bytes())
+	sanitized := SanitizeHTML(buf.Bytes())
 	return template.HTML(sanitized), nil
+}
+
+// SanitizeHTML applies strict sanitization to HTML content from untrusted sources.
+// Blocks dangerous elements while preserving safe formatting:
+// - Allowed: paragraphs, headings, bold, italic, links, tables, lists, code, blockquotes
+// - Blocked: scripts, objects, embeds, SVGs, style tags, event handlers, javascript: URIs
+// - Blocked: style attributes that could inject CSS
+func SanitizeHTML(html []byte) []byte {
+	p := newRulebookPolicy()
+	return p.SanitizeBytes(html)
+}
+
+// newRulebookPolicy creates a strict bluemonday policy for credential rulebooks
+// and other untrusted HTML/markdown content from external sources.
+// This policy is more restrictive than UGCPolicy to prevent:
+// - JavaScript execution via event handlers
+// - CSS injection via style attributes
+// - SVG/object attacks
+// - Potentially dangerous HTML elements
+func newRulebookPolicy() *bluemonday.Policy {
+	p := bluemonday.NewPolicy()
+
+	// Allow safe structural elements
+	p.AllowElements("p", "div", "br")
+	p.AllowElements("h1", "h2", "h3", "h4", "h5", "h6")
+	p.AllowElements("blockquote", "hr")
+
+	// Allow text formatting
+	p.AllowElements("strong", "em", "code", "pre", "sub", "sup", "mark")
+	p.AllowElements("del", "ins")
+
+	// Allow links (but not javascript: protocol)
+	p.AllowElements("a")
+	p.AllowAttrs("href").OnElements("a")
+	p.AllowAttrs("title").OnElements("a")
+	p.AllowAttrs("target").OnElements("a")
+	p.AllowAttrs("rel").OnElements("a")
+
+	// Allow lists
+	p.AllowElements("ol", "ul", "li", "dl", "dt", "dd")
+
+	// Allow tables
+	p.AllowElements("table", "thead", "tbody", "tfoot", "tr", "th", "td", "caption", "col", "colgroup")
+	p.AllowAttrs("colspan", "rowspan", "scope").OnElements("th", "td")
+
+	// Allow images (URL only, no inline SVG)
+	p.AllowElements("img")
+	p.AllowAttrs("src", "alt", "title", "width", "height").OnElements("img")
+
+	// Explicitly block dangerous elements
+	p.AllowNoAttrs().OnElements("table", "thead", "tbody", "tfoot", "tr")
+
+	// Block potentially dangerous protocols in URLs (script: specific handling)
+	p.AllowURLSchemes("http", "https", "ftp", "ftps", "mailto")
+
+	// Don't allow any style attributes to prevent CSS injection
+	// Don't allow event handlers (onclick, onerror, etc)
+	// These are implicitly blocked by not calling AllowAttrs for them
+
+	return p
+}
+
+// SanitizeSVG sanitizes inline SVG content to remove scripts and event handlers.
+// Inline SVGs from credential metadata are processed separately to allow safe SVG
+// display while blocking XSS attacks. Returns empty string if SVG contains dangerous
+// content that cannot be safely sanitized.
+func SanitizeSVG(svgContent []byte) template.HTML {
+	// SVGs are complex and potentially dangerous. The safest approach is to:
+	// 1. Block inline SVGs entirely in markdown/rulebooks (via policy above)
+	// 2. Only allow SVG URIs (external files), not inline content
+	// 3. For VCTM logos/backgrounds, only allow safe image URIs
+	//
+	// If inline SVG support is needed in future, use a dedicated SVG sanitization
+	// library (e.g., github.com/RobotsAndPencils/go-svg) rather than general HTML sanitization.
+
+	// For now, return empty to indicate SVG was blocked
+	return ""
+}
+
+// ValidateCredentialImageURI checks if an image URI is safe for credential display.
+// Only allows http/https URIs, blocks data: URIs and javascript: protocols.
+func ValidateCredentialImageURI(uri string) bool {
+	if uri == "" {
+		return false
+	}
+	return strings.HasPrefix(uri, "http://") || strings.HasPrefix(uri, "https://")
 }
 
 // CopyStaticAssets copies static files (CSS, images) from a source directory

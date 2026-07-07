@@ -72,3 +72,38 @@ type OrgData struct {
 	HasTS11     bool
 	AvatarURL   string
 }
+
+// SanitizeVCTM validates and sanitizes VCTM data from external sources.
+// Validates image URIs to prevent data: URIs and other dangerous protocols.
+// Mutates the input VCTM to remove unsafe URI references.
+func SanitizeVCTM(vctm *VCTMData) {
+	if vctm == nil {
+		return
+	}
+
+	// Validate display entries and their image URIs
+	for i := range vctm.Display {
+		display := &vctm.Display[i]
+
+		// Validate logo URI
+		if display.Logo != nil && !ValidateCredentialImageURI(display.Logo.URI) {
+			display.Logo = nil
+		}
+
+		// Validate background image URI
+		if display.BackgroundImage != nil && !ValidateCredentialImageURI(display.BackgroundImage.URI) {
+			display.BackgroundImage = nil
+		}
+
+		// Validate SVG template URIs
+		if display.Rendering != nil {
+			validTemplates := []VCTMSVGTemplate{}
+			for _, tmpl := range display.Rendering.SVGTemplates {
+				if ValidateCredentialImageURI(tmpl.URI) {
+					validTemplates = append(validTemplates, tmpl)
+				}
+			}
+			display.Rendering.SVGTemplates = validTemplates
+		}
+	}
+}

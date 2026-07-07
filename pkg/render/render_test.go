@@ -216,6 +216,127 @@ func TestRenderMarkdown_SanitizesSVGXSS(t *testing.T) {
 	assert.NotContains(t, result, "<embed")
 }
 
+func TestSanitizeHTML_BlocksStyleAttacks(t *testing.T) {
+	// Verify that style attributes and CSS injection is blocked
+	attacks := []struct {
+		html    string
+		content string
+	}{
+		{`<p style="color:red">Text</p>`, "Text"},
+		{`<div style="background:url(javascript:alert(1))">Content</div>`, "Content"},
+		{`<span style="position:fixed;top:0;left:0;width:100%;height:100%;background:red">Overlay</span>`, "Overlay"},
+		{`<table><tr><td style="font-size:999999px">Huge</td></tr></table>`, "Huge"},
+	}
+
+	for _, attack := range attacks {
+		result := SanitizeHTML([]byte(attack.html))
+		resultStr := string(result)
+
+		// style attribute must be removed
+		assert.NotContains(t, resultStr, "style=", "attack: %s", attack.html)
+		// Safe content should be preserved
+		assert.Contains(t, resultStr, attack.content, "attack: %s", attack.html)
+	}
+}
+
+func TestSanitizeHTML_BlocksEventHandlers(t *testing.T) {
+	// Verify that event handlers are blocked
+	attacks := []string{
+		`<div onclick="alert(1)">Click me</div>`,
+		`<img onerror="fetch('http://evil.com')">`,
+		`<a onmouseover="alert(1)">Link</a>`,
+		`<body onload="bad()">`,
+		`<p onwheel="malicious()">Text</p>`,
+	}
+
+	for _, attack := range attacks {
+		result := SanitizeHTML([]byte(attack))
+		resultStr := string(result)
+
+		// Event handlers must be stripped
+		assert.NotContains(t, resultStr, "onclick", "attack: %s", attack)
+		assert.NotContains(t, resultStr, "onerror", "attack: %s", attack)
+		assert.NotContains(t, resultStr, "onmouseover", "attack: %s", attack)
+		assert.NotContains(t, resultStr, "onload", "attack: %s", attack)
+		assert.NotContains(t, resultStr, "onwheel", "attack: %s", attack)
+	}
+}
+
+func TestSanitizeHTML_BlocksDataURIs(t *testing.T) {
+	// Verify that data: URIs in images are blocked
+	attacks := []string{
+		`<img src="data:text/html,<script>alert(1)</script>">`,
+		`<img src="data:image/svg+xml,<svg onload=alert(1)>">`,
+		`<a href="data:text/html,<script>alert(1)</script>">Click</a>`,
+	}
+
+	for _, attack := range attacks {
+		result := SanitizeHTML([]byte(attack))
+		resultStr := string(result)
+
+		// data: URIs should be stripped
+		assert.NotContains(t, resultStr, "data:", "attack: %s", attack)
+	}
+}
+
+func TestSanitizeHTML_PreservesLinks(t *testing.T) {
+	// Verify that safe links are preserved
+	html := `<a href="https://example.com">Visit example</a>`
+	result := SanitizeHTML([]byte(html))
+	resultStr := string(result)
+
+	assert.Contains(t, resultStr, "https://example.com")
+	assert.Contains(t, resultStr, "Visit example")
+}
+
+func TestSanitizeHTML_PreservesListsAndTables(t *testing.T) {
+	// Verify that safe structured content is preserved
+	html := `
+<ul>
+  <li>Item 1</li>
+  <li>Item 2</li>
+</ul>
+
+<table>
+  <thead>
+    <tr><th>Header</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Data</td></tr>
+  </tbody>
+</table>
+`
+	result := SanitizeHTML([]byte(html))
+	resultStr := string(result)
+
+	assert.Contains(t, resultStr, "<li>Item 1</li>")
+	assert.Contains(t, resultStr, "<li>Item 2</li>")
+	assert.Contains(t, resultStr, "<table>")
+	assert.Contains(t, resultStr, "<thead>")
+	assert.Contains(t, resultStr, "<td>Data</td>")
+}
+
+func TestValidateCredentialImageURI_AllowsHTTPS(t *testing.T) {
+	tests := []struct {
+		uri   string
+		valid bool
+	}{
+		{"https://example.com/image.png", true},
+		{"http://example.com/image.png", true},
+		{"https://cdn.example.com/logo.svg", true},
+		{"data:image/svg+xml,...", false},
+		{"javascript:alert(1)", false},
+		{"blob:...", false},
+		{"file:///etc/passwd", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		result := ValidateCredentialImageURI(tt.uri)
+		assert.Equal(t, tt.valid, result, "URI: %s", tt.uri)
+	}
+}
+
 func TestRenderTS11Docs(t *testing.T) {
 	r, err := NewRenderer("")
 	require.NoError(t, err)
