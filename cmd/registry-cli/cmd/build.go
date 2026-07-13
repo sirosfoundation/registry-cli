@@ -16,7 +16,12 @@ import (
 	"github.com/sirosfoundation/registry-cli/pkg/discovery"
 	"github.com/sirosfoundation/registry-cli/pkg/mdcred"
 	"github.com/sirosfoundation/registry-cli/pkg/render"
+	"github.com/sirosfoundation/registry-cli/pkg/repoplugin"
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
+
+	// Register repo layout plugins
+	_ "github.com/sirosfoundation/registry-cli/pkg/repoplugin/defaultlayout"
+	_ "github.com/sirosfoundation/registry-cli/pkg/repoplugin/rulebookcatalog"
 )
 
 var buildCmd = &cobra.Command{
@@ -273,6 +278,20 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		}
 	}
 
+	// Determine which plugin to use
+	layoutName := repo.Layout
+	if layoutName == "" {
+		layoutName = "default"
+	}
+
+	// If using a non-default plugin, delegate entirely to the plugin
+	if layoutName != "default" {
+		return processRepoWithPlugin(layoutName, repo, repoDir, org, baseURL, logger)
+	}
+
+	// Default layout: existing inline logic (kept for backward compatibility
+	// and to avoid a risky refactor of the enrichment path in one step).
+
 	// Pass 0: convert markdown credential files to VCTM format files
 	converted, err := mdcred.ConvertDirPath(repoDir, repo.Path, baseURL)
 	if err != nil {
@@ -384,6 +403,99 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 	}
 
 	return schemas, nil
+}
+
+// processRepoWithPlugin uses a named repo plugin to discover credentials,
+// then converts the plugin's DiscoveredCredential output into SchemaMeta
+// objects for the existing pipeline.
+func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoDir, org, baseURL string, logger *slog.Logger) ([]*schemameta.SchemaMeta, error) {
+	plugin, ok := repoplugin.Get(layoutName)
+	if !ok {
+		return nil, fmt.Errorf("unknown repo layout plugin: %q (available: %v)", layoutName, repoplugin.DefaultRegistry.List())
+	}
+
+	logger.Info("using repo plugin", "layout", layoutName, "plugin", plugin.Description())
+
+	// Build options map, injecting source provenance
+	options := make(map[string]string)
+	for k, v := range repo.Options {
+		options[k] = v
+	}
+	options["source_url"] = repo.URL
+	options["source_repo"] = extractRepoName(repo.URL)
+
+	ctx := repoplugin.Context{
+		RepoDir:      repoDir,
+		SubPath:      repo.Path,
+		Organization: org,
+		BaseURL:      baseURL,
+		Options:      options,
+		Logger:       logger,
+	}
+
+	discovered, err := plugin.Discover(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("plugin %q discover: %w", layoutName, err)
+	}
+
+	// Convert DiscoveredCredentials to SchemaMeta objects
+	var schemas []*schemameta.SchemaMeta
+	for _, cred := range discovered {
+		var sm *schemameta.SchemaMeta
+
+		if cred.SchemaMetaSource != nil {
+			// TS11-compliant: infer full SchemaMeta from source + detected formats
+			formats, formatFiles := extractFormatsFromDiscovered(cred)
+			sm = schemameta.Infer(cred.SchemaMetaSource, cred.Org, cred.Slug, baseURL, formats, formatFiles)
+		} else {
+			// Legacy: no governance metadata
+			formats, formatFiles := extractFormatsFromDiscovered(cred)
+			sm = schemameta.InferLegacy(cred.Org, cred.Slug, baseURL, formats, formatFiles)
+		}
+
+		// If the plugin generated VCTM content, write it to the repo dir
+		// so the enrichment pass (buildCredentialData) can find it.
+		if len(cred.GeneratedVCTM) > 0 {
+			vctmDir := filepath.Join(repoDir, cred.Slug)
+			if mkErr := os.MkdirAll(vctmDir, 0o755); mkErr == nil {
+				vctmPath := filepath.Join(vctmDir, cred.Slug+".vctm.json")
+				_ = os.WriteFile(vctmPath, cred.GeneratedVCTM, 0o644)
+			}
+		}
+
+		// If the plugin found a rulebook, symlink/copy it to the expected location
+		if cred.RulebookPath != "" {
+			rbDir := filepath.Join(repoDir, cred.Slug)
+			if mkErr := os.MkdirAll(rbDir, 0o755); mkErr == nil {
+				rbDest := filepath.Join(rbDir, "rulebook.md")
+				if _, statErr := os.Stat(rbDest); os.IsNotExist(statErr) {
+					// Copy rulebook content to expected location
+					if data, readErr := os.ReadFile(cred.RulebookPath); readErr == nil {
+						_ = os.WriteFile(rbDest, data, 0o644)
+					}
+				}
+			}
+		}
+
+		schemas = append(schemas, sm)
+		logger.Info("plugin processed credential",
+			"org", cred.Org, "slug", cred.Slug, "id", sm.ID,
+			"formats", sm.SupportedFormats,
+			"ts11", cred.SchemaMetaSource != nil)
+	}
+
+	return schemas, nil
+}
+
+// extractFormatsFromDiscovered builds format slices from a DiscoveredCredential.
+func extractFormatsFromDiscovered(cred repoplugin.DiscoveredCredential) ([]string, map[string]string) {
+	formats := make([]string, 0, len(cred.FormatFiles))
+	formatFiles := make(map[string]string, len(cred.FormatFiles))
+	for format, path := range cred.FormatFiles {
+		formats = append(formats, format)
+		formatFiles[format] = path
+	}
+	return formats, formatFiles
 }
 
 func writeOutputs(outputDir, baseURL string, schemas []*schemameta.SchemaMeta) error {
