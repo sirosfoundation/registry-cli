@@ -75,6 +75,116 @@ Source entries can be plain strings or structs with `url` and optional
 `organization` fields. Local (`file://`) sources default to organization
 "Local" if no label is provided.
 
+### Layout plugins
+
+Each source entry may specify a `layout` field to select a **repo plugin** that
+understands the repository's directory structure. If omitted, the `default`
+plugin is used.
+
+```yaml
+sources:
+  # Default layout (omitted or explicit)
+  - url: "git:https://github.com/sirosfoundation/demo-credentials.git"
+    branch: vctm
+
+  # EUDI-style rulebook catalog
+  - url: "git:https://github.com/webuild-consortium/webuild-attestation-rulebooks-catalog.git"
+    organization: "webuild-consortium"
+    layout: "rulebook-catalog"
+    options:
+      attestation_los: "iso_18045_high"
+      binding_type: "key"
+```
+
+#### Source entry fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `url` | string | *(required)* | Source URL (`git:`, `file://`, or meta-source like `github:topic/vctm`) |
+| `organization` | string | *(inferred from URL)* | Organization label for grouping |
+| `branch` | string | manifest default | Git branch to clone |
+| `path` | string | *(repo root)* | Restrict discovery to a subdirectory |
+| `layout` | string | `"default"` | Repo plugin name (see below) |
+| `options` | map | *(empty)* | Plugin-specific key-value configuration |
+
+#### Available plugins
+
+##### `default`
+
+Handles the standard SIROS credential layout with co-located files per
+credential:
+
+```
+<slug>.schema-meta.yaml   (TS11 governance — required for TS11 API)
+<slug>.vctm.json          (SD-JWT VC Type Metadata)
+<slug>.mdoc.json          (mDOC metadata)
+<slug>.vc.json            (W3C VC schema)
+rulebook.md               (co-located governance document)
+```
+
+Also supports:
+- Markdown files with `vct:` YAML front matter (auto-converted to all formats)
+- Legacy bare `.vctm` or `.json` files without schema-meta
+
+##### `rulebook-catalog`
+
+Handles **EUDI ARF-style** attestation rulebook catalog repositories such as
+[webuild-attestation-rulebooks-catalog](https://github.com/webuild-consortium/webuild-attestation-rulebooks-catalog)
+and [eudi-doc-attestation-rulebooks-catalog](https://github.com/eu-digital-identity-wallet/eudi-doc-attestation-rulebooks-catalog).
+
+**Expected directory structure:**
+```
+data-schemas/
+  sd-jwt/<name>-sd-jwt.json    (JSON Schema 2020-12 validation definitions)
+  mdoc/<name>-mdoc.json        (mDOC validation schemas)
+rulebooks/
+  rb-<slug>/README.md          (EUDI-template governance document)
+```
+
+**What it does:**
+1. Discovers credentials from `data-schemas/sd-jwt/*-sd-jwt.json`
+2. Extracts `vct` from `properties.vct.const` or `properties.vct.examples[0]`
+3. Converts JSON Schema properties → VCTM claims:
+   - `required` array → `mandatory: true`
+   - Descriptions with "selectively disclosable" → `sd: "always"`
+   - Property names → display labels (snake_case → Title Case)
+4. Maps `rulebooks/rb-<slug>/README.md` as the governance rulebook
+5. Detects matching mDOC schemas from `data-schemas/mdoc/`
+6. Normalizes legacy `dsNNN-` filename prefixes (e.g., `ds002-pid` → `pid`)
+
+**Plugin options:**
+
+| Option | Description |
+|--------|-------------|
+| `attestation_los` | Default TS11 Level of Surety for all credentials in this source |
+| `binding_type` | Default TS11 binding type for all credentials in this source |
+| `version` | Default schema version |
+
+Without `attestation_los` and `binding_type`, credentials will appear on the
+site but not in the TS11 API (same as publishing without schema-meta).
+
+#### Writing a custom plugin
+
+Plugins implement the `repoplugin.Plugin` interface:
+
+```go
+package repoplugin
+
+type Plugin interface {
+    Name() string
+    Description() string
+    Discover(ctx Context) ([]DiscoveredCredential, error)
+}
+```
+
+Plugins self-register via `init()` and are compiled in by importing the package:
+
+```go
+import _ "github.com/sirosfoundation/registry-cli/pkg/repoplugin/myplugin"
+```
+
+See `pkg/repoplugin/rulebookcatalog/` for a complete example.
+
 ## Schema-meta: TS11 Governance Metadata
 
 Each credential must have a co-located `.schema-meta.yaml` file (or `.schema-meta.json`) providing TS11 **Catalogue of Attestations** compliance metadata. Only **two fields are required**; all others are inferred automatically.
@@ -164,6 +274,9 @@ Credentials discovered without a `.schema-meta.yaml` file appear in the **human-
 | Package | Purpose |
 |---|---|
 | `pkg/discovery` | Source resolution, GitHub topic search, repo cloning |
+| `pkg/repoplugin` | Repo layout plugin interface and registry |
+| `pkg/repoplugin/defaultlayout` | Default plugin: co-located schema-meta + format files |
+| `pkg/repoplugin/rulebookcatalog` | EUDI-style catalog plugin: JSON Schema → VCTM conversion |
 | `pkg/schemameta` | TS11 schema-meta parsing, inference, validation |
 | `pkg/render` | HTML template rendering, markdown conversion |
 | `pkg/jwssign` | JWS signing (dev, SoftHSM, YubiHSM) via PKCS#11 |
