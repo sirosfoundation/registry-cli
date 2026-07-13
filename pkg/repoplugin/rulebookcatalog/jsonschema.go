@@ -45,9 +45,36 @@ type vctmOutput struct {
 }
 
 type vctmDisplay struct {
-	Locale      string `json:"locale"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
+	Locale      string         `json:"locale"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Rendering   *vctmRendering `json:"rendering,omitempty"`
+}
+
+type vctmRendering struct {
+	Simple       *vctmSimple       `json:"simple,omitempty"`
+	SVGTemplates []vctmSVGTemplate `json:"svg_templates,omitempty"`
+}
+
+type vctmSimple struct {
+	Logo            *vctmImage `json:"logo,omitempty"`
+	BackgroundColor string     `json:"background_color,omitempty"`
+	TextColor       string     `json:"text_color,omitempty"`
+}
+
+type vctmImage struct {
+	URI     string `json:"uri"`
+	AltText string `json:"alt_text,omitempty"`
+}
+
+type vctmSVGTemplate struct {
+	URI        string              `json:"uri"`
+	Properties *vctmTemplateProps  `json:"properties,omitempty"`
+}
+
+type vctmTemplateProps struct {
+	Orientation string `json:"orientation,omitempty"`
+	ColorScheme string `json:"color_scheme,omitempty"`
 }
 
 type vctmClaim struct {
@@ -81,7 +108,8 @@ var infrastructureClaims = map[string]bool{
 var sdPattern = regexp.MustCompile(`(?i)(MUST be selectively disclos|selectively disclosable|SD claim)`)
 
 // convertJSONSchemaToVCTM reads a JSON Schema file and produces VCTM JSON bytes.
-func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string) ([]byte, error) {
+// assets maps discovered asset keys to their registry URLs (already resolved).
+func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[string]string) ([]byte, error) {
 	data, err := os.ReadFile(schemaPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading schema file: %w", err)
@@ -169,6 +197,7 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string) ([]byte, err
 				Locale:      "en-US",
 				Name:        cleanDisplayName(name),
 				Description: schema.Description,
+				Rendering:   buildRendering(assets),
 			},
 		},
 		Claims: claims,
@@ -249,4 +278,42 @@ func cleanDisplayName(title string) string {
 	}
 
 	return strings.TrimSpace(title)
+}
+
+// buildRendering constructs VCTM rendering from discovered assets.
+// Returns nil if no assets are available.
+func buildRendering(assets map[string]string) *vctmRendering {
+	if len(assets) == 0 {
+		return nil
+	}
+
+	rendering := &vctmRendering{}
+
+	// SVG templates
+	if uri, ok := assets["svg_template"]; ok {
+		tmpl := vctmSVGTemplate{
+			URI:        uri,
+			Properties: &vctmTemplateProps{Orientation: "landscape", ColorScheme: "light"},
+		}
+		rendering.SVGTemplates = append(rendering.SVGTemplates, tmpl)
+	}
+	if uri, ok := assets["svg_template_dark"]; ok {
+		tmpl := vctmSVGTemplate{
+			URI:        uri,
+			Properties: &vctmTemplateProps{Orientation: "landscape", ColorScheme: "dark"},
+		}
+		rendering.SVGTemplates = append(rendering.SVGTemplates, tmpl)
+	}
+
+	// Logo for simple rendering
+	if uri, ok := assets["logo"]; ok {
+		rendering.Simple = &vctmSimple{
+			Logo: &vctmImage{URI: uri},
+		}
+	}
+
+	if rendering.Simple == nil && len(rendering.SVGTemplates) == 0 {
+		return nil
+	}
+	return rendering
 }

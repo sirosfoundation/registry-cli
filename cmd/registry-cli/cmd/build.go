@@ -491,6 +491,20 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 			}
 		}
 
+		// Stage discovered assets (SVG templates, logos) to the output
+		// directory alongside the credential so they're served at the
+		// URLs referenced in the generated VCTM.
+		for assetKey, srcPath := range cred.Assets {
+			ext := filepath.Ext(srcPath)
+			assetFilename := cred.Slug + "-" + assetKey + ext
+			dstPath := filepath.Join(credDir, assetFilename)
+			if _, statErr := os.Stat(dstPath); os.IsNotExist(statErr) {
+				if data, readErr := os.ReadFile(srcPath); readErr == nil {
+					_ = os.WriteFile(dstPath, data, 0o644)
+				}
+			}
+		}
+
 		// Build SchemaMeta from staged (slug-named) files
 		var sm *schemameta.SchemaMeta
 		formats := make([]string, 0, len(stagedFiles))

@@ -42,6 +42,13 @@ type DiscoveredCredential struct {
 	// in-memory by the plugin.
 	GeneratedMdoc []byte
 
+	// Assets maps asset type keys to absolute file paths for discovered
+	// visual assets (SVG templates, logos, etc.). Convention keys:
+	//   "svg_template"       — card SVG template
+	//   "svg_template_dark"  — dark mode variant
+	//   "logo"              — credential logo (SVG or PNG)
+	Assets map[string]string
+
 	// RulebookPath is the absolute path to the rulebook source (markdown).
 	// Empty if no rulebook is available.
 	RulebookPath string
