@@ -35,10 +35,12 @@ type SourceDefaults struct {
 //	    organization: "MyOrg"
 //	    branch: "vctm"
 type SourceEntry struct {
-	URL          string `yaml:"url"`
-	Organization string `yaml:"organization,omitempty"`
-	Branch       string `yaml:"branch,omitempty"`
-	Path         string `yaml:"path,omitempty"`
+	URL          string            `yaml:"url"`
+	Organization string            `yaml:"organization,omitempty"`
+	Branch       string            `yaml:"branch,omitempty"`
+	Path         string            `yaml:"path,omitempty"`
+	Layout       string            `yaml:"layout,omitempty"`
+	Options      map[string]string `yaml:"options,omitempty"`
 }
 
 // UnmarshalYAML allows SourceEntry to be parsed from either a plain string
@@ -54,11 +56,13 @@ func (s *SourceEntry) UnmarshalYAML(value *yaml.Node) error {
 
 // ResolvedRepo is a concrete git repository to fetch credential data from.
 type ResolvedRepo struct {
-	URL          string // git clone URL
-	Branch       string // branch to fetch from
-	Origin       string // how this repo was discovered (e.g. "explicit", "github:topic/vctm")
-	Organization string // explicit organization label (empty = infer from URL)
-	Path         string // optional relative path within the repo to restrict credential discovery
+	URL          string            // git clone URL
+	Branch       string            // branch to fetch from
+	Origin       string            // how this repo was discovered (e.g. "explicit", "github:topic/vctm")
+	Organization string            // explicit organization label (empty = infer from URL)
+	Path         string            // optional relative path within the repo to restrict credential discovery
+	Layout       string            // repo plugin layout name (empty = "default")
+	Options      map[string]string // layout-specific options from sources.yaml
 }
 
 // Resolver resolves meta-sources into concrete repos.
@@ -108,6 +112,8 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 				Origin:       "explicit",
 				Organization: entry.Organization,
 				Path:         entry.Path,
+				Layout:       entry.Layout,
+				Options:      entry.Options,
 			}
 			continue
 		}
@@ -129,6 +135,8 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 				Origin:       "local",
 				Organization: org,
 				Path:         entry.Path,
+				Layout:       entry.Layout,
+				Options:      entry.Options,
 			}
 			continue
 		}
@@ -150,6 +158,12 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 					}
 					if entry.Path != "" {
 						repos[i].Path = entry.Path
+					}
+					if entry.Layout != "" {
+						repos[i].Layout = entry.Layout
+					}
+					if entry.Options != nil {
+						repos[i].Options = entry.Options
 					}
 				}
 				discovered = append(discovered, repos...)
