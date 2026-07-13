@@ -441,40 +441,67 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 	// Convert DiscoveredCredentials to SchemaMeta objects
 	var schemas []*schemameta.SchemaMeta
 	for _, cred := range discovered {
-		var sm *schemameta.SchemaMeta
-
-		if cred.SchemaMetaSource != nil {
-			// TS11-compliant: infer full SchemaMeta from source + detected formats
-			formats, formatFiles := extractFormatsFromDiscovered(cred)
-			sm = schemameta.Infer(cred.SchemaMetaSource, cred.Org, cred.Slug, baseURL, formats, formatFiles)
-		} else {
-			// Legacy: no governance metadata
-			formats, formatFiles := extractFormatsFromDiscovered(cred)
-			sm = schemameta.InferLegacy(cred.Org, cred.Slug, baseURL, formats, formatFiles)
+		// Stage all credential files into a slug-based directory so the
+		// enrichment pass (buildCredentialData → findCredDir → orgSlugFromID)
+		// can locate them using the normalized slug.
+		credDir := filepath.Join(repoDir, cred.Slug)
+		if mkErr := os.MkdirAll(credDir, 0o755); mkErr != nil {
+			logger.Warn("creating credential dir", "slug", cred.Slug, "error", mkErr)
+			continue
 		}
 
-		// If the plugin generated VCTM content, write it to the repo dir
-		// so the enrichment pass (buildCredentialData) can find it.
+		// Stage generated VCTM
 		if len(cred.GeneratedVCTM) > 0 {
-			vctmDir := filepath.Join(repoDir, cred.Slug)
-			if mkErr := os.MkdirAll(vctmDir, 0o755); mkErr == nil {
-				vctmPath := filepath.Join(vctmDir, cred.Slug+".vctm.json")
-				_ = os.WriteFile(vctmPath, cred.GeneratedVCTM, 0o644)
-			}
+			vctmPath := filepath.Join(credDir, cred.Slug+".vctm.json")
+			_ = os.WriteFile(vctmPath, cred.GeneratedVCTM, 0o644)
 		}
 
-		// If the plugin found a rulebook, symlink/copy it to the expected location
+		// Stage rulebook
 		if cred.RulebookPath != "" {
-			rbDir := filepath.Join(repoDir, cred.Slug)
-			if mkErr := os.MkdirAll(rbDir, 0o755); mkErr == nil {
-				rbDest := filepath.Join(rbDir, "rulebook.md")
-				if _, statErr := os.Stat(rbDest); os.IsNotExist(statErr) {
-					// Copy rulebook content to expected location
-					if data, readErr := os.ReadFile(cred.RulebookPath); readErr == nil {
-						_ = os.WriteFile(rbDest, data, 0o644)
-					}
+			rbDest := filepath.Join(credDir, "rulebook.md")
+			if _, statErr := os.Stat(rbDest); os.IsNotExist(statErr) {
+				if data, readErr := os.ReadFile(cred.RulebookPath); readErr == nil {
+					_ = os.WriteFile(rbDest, data, 0o644)
 				}
 			}
+		}
+
+		// Stage format files with slug-based names so SchemaURIs resolve
+		// correctly (e.g., "pid.vctm.json" not "ds002-pid-sd-jwt.json").
+		stagedFiles := make(map[string]string)
+		for format, srcPath := range cred.FormatFiles {
+			ext, ok := formatIdentifierToExt(format)
+			if !ok {
+				continue
+			}
+			dstPath := filepath.Join(credDir, cred.Slug+ext)
+			if _, statErr := os.Stat(dstPath); os.IsNotExist(statErr) {
+				if data, readErr := os.ReadFile(srcPath); readErr == nil {
+					_ = os.WriteFile(dstPath, data, 0o644)
+				}
+			}
+			stagedFiles[format] = dstPath
+		}
+
+		// If we generated a VCTM but no dc+sd-jwt format file was staged,
+		// use the generated VCTM as the dc+sd-jwt format file.
+		if len(cred.GeneratedVCTM) > 0 {
+			if _, hasFmt := stagedFiles["dc+sd-jwt"]; !hasFmt {
+				stagedFiles["dc+sd-jwt"] = filepath.Join(credDir, cred.Slug+".vctm.json")
+			}
+		}
+
+		// Build SchemaMeta from staged (slug-named) files
+		var sm *schemameta.SchemaMeta
+		formats := make([]string, 0, len(stagedFiles))
+		for f := range stagedFiles {
+			formats = append(formats, f)
+		}
+
+		if cred.SchemaMetaSource != nil {
+			sm = schemameta.Infer(cred.SchemaMetaSource, cred.Org, cred.Slug, baseURL, formats, stagedFiles)
+		} else {
+			sm = schemameta.InferLegacy(cred.Org, cred.Slug, baseURL, formats, stagedFiles)
 		}
 
 		schemas = append(schemas, sm)
@@ -487,15 +514,14 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 	return schemas, nil
 }
 
-// extractFormatsFromDiscovered builds format slices from a DiscoveredCredential.
-func extractFormatsFromDiscovered(cred repoplugin.DiscoveredCredential) ([]string, map[string]string) {
-	formats := make([]string, 0, len(cred.FormatFiles))
-	formatFiles := make(map[string]string, len(cred.FormatFiles))
-	for format, path := range cred.FormatFiles {
-		formats = append(formats, format)
-		formatFiles[format] = path
+// formatIdentifierToExt maps TS11 format identifiers back to file extensions.
+func formatIdentifierToExt(format string) (string, bool) {
+	for ext, fmtID := range schemameta.FormatMapping {
+		if fmtID == format {
+			return ext, true
+		}
 	}
-	return formats, formatFiles
+	return "", false
 }
 
 func writeOutputs(outputDir, baseURL string, schemas []*schemameta.SchemaMeta) error {
