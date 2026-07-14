@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/sirosfoundation/registry-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/sirosfoundation/registry-cli/actions/workflows/ci.yml)
 [![Security](https://github.com/sirosfoundation/registry-cli/actions/workflows/security.yml/badge.svg)](https://github.com/sirosfoundation/registry-cli/actions/workflows/security.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/sirosfoundation/registry-cli)](https://goreportcard.com/report/github.com/sirosfoundation/registry-cli)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/sirosfoundation/registry-cli/badge)](https://scorecard.dev/viewer/?uri=github.com/sirosfoundation/registry-cli)
 [![License](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](LICENSE)
 
 A CLI tool for building TS11-compliant Catalogue of Attestations sites from
