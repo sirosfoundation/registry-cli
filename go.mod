@@ -3,7 +3,7 @@ module github.com/sirosfoundation/registry-cli
 go 1.26.4
 
 require (
-	github.com/ThalesGroup/crypto11 v1.2.6
+	github.com/ThalesGroup/crypto11 v1.6.2
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/google/go-github/v62 v62.0.0
 	github.com/google/uuid v1.6.0
@@ -11,7 +11,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	github.com/yuin/goldmark v1.8.2
+	github.com/yuin/goldmark v1.8.4
 	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 )
