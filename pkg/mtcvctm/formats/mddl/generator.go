@@ -118,9 +118,10 @@ type NamespaceClaims map[string]ClaimMetadata
 
 // ClaimMetadata contains metadata for an individual claim
 type ClaimMetadata struct {
-	Display   []ClaimDisplay `json:"display,omitempty"`
-	Mandatory bool           `json:"mandatory,omitempty"`
-	ValueType string         `json:"value_type,omitempty"`
+	Display   []ClaimDisplay           `json:"display,omitempty"`
+	Mandatory bool                     `json:"mandatory,omitempty"`
+	ValueType string                   `json:"value_type,omitempty"`
+	Elements  map[string]ClaimMetadata `json:"elements,omitempty"`
 }
 
 // ClaimDisplay for claim-level display
@@ -181,7 +182,7 @@ func (g *Generator) Generate(parsed *formats.ParsedCredential, cfg *config.Confi
 		mddl.Claims = make(map[string]NamespaceClaims)
 		mddl.Claims[namespace] = make(NamespaceClaims)
 
-		flattenClaimsMDOC(parsed.Claims, mddl.Claims[namespace], "", cfg.Language, parsed.ClaimMappings)
+		flattenClaimsMDOC(parsed.Claims, mddl.Claims[namespace], cfg.Language, parsed.ClaimMappings)
 	}
 
 	// Check for order override
@@ -216,70 +217,97 @@ func mapTypeToCDDL(mdType string) string {
 	case "image":
 		return "bstr"
 	case "object":
-		return "" // Nested structure — children are flattened
+		return "map" // CDDL map — element shape described via "elements"
 	case "array":
-		return "" // Array type — children are flattened
+		return "array" // CDDL array — item shape described via "elements"
 	default:
 		return "tstr"
 	}
 }
 
-// flattenClaimsMDOC recursively flattens claim definitions into the mDOC namespace
-// claims map. Container types (object/array) are not emitted themselves — only their
-// leaf children are emitted with dot-joined names (e.g. "address.street").
-func flattenClaimsMDOC(claims []formats.ClaimDefinition, ns NamespaceClaims, prefix string, defaultLocale string, claimMappings map[string]map[string]string) {
-	for _, claim := range claims {
-		// Get claim name, applying format mapping if present
-		claimName := claim.Name
-		if mapping, ok := claim.FormatMappings["mddl"]; ok {
-			claimName = mapping
-		}
-		if mappings, ok := claimMappings["mddl"]; ok {
-			if mapped, ok := mappings[claim.Name]; ok {
-				claimName = mapped
-			}
-		}
-
-		fullName := claimName
-		if prefix != "" {
-			fullName = prefix + "." + claimName
-		}
-
-		// If this is a container with children, recurse instead of emitting
-		if len(claim.Children) > 0 && (strings.ToLower(claim.Type) == "object" || strings.ToLower(claim.Type) == "array") {
-			flattenClaimsMDOC(claim.Children, ns, fullName, defaultLocale, claimMappings)
+// claimDisplay builds the localized display array for a single claim.
+func claimDisplay(claim formats.ClaimDefinition, defaultLocale string) []ClaimDisplay {
+	var displays []ClaimDisplay
+	displayName := claim.DisplayName
+	if displayName == "" {
+		displayName = claim.Name
+	}
+	displays = append(displays, ClaimDisplay{
+		Locale: defaultLocale,
+		Name:   displayName,
+	})
+	for locale, loc := range claim.Localizations {
+		if locale == defaultLocale {
 			continue
 		}
-
-		meta := ClaimMetadata{
-			Mandatory: claim.Mandatory,
-			ValueType: mapTypeToCDDL(claim.Type),
-		}
-
-		// Build display array
-		var displays []ClaimDisplay
-		displayName := claim.DisplayName
-		if displayName == "" {
-			displayName = claim.Name
+		label := loc.Label
+		if label == "" {
+			label = displayName
 		}
 		displays = append(displays, ClaimDisplay{
-			Locale: defaultLocale,
-			Name:   displayName,
+			Locale: locale,
+			Name:   label,
 		})
-		for locale, loc := range claim.Localizations {
-			if locale == defaultLocale {
-				continue
-			}
-			label := loc.Label
-			if label == "" {
-				label = displayName
-			}
-			displays = append(displays, ClaimDisplay{
-				Locale: locale,
-				Name:   label,
-			})
+	}
+	return displays
+}
+
+// isContainerClaim reports whether a claim represents a structured CBOR
+// element (an mdoc "array" or "map") rather than a scalar leaf value.
+func isContainerClaim(claim formats.ClaimDefinition) bool {
+	t := strings.ToLower(claim.Type)
+	return len(claim.Children) > 0 && (t == "object" || t == "array")
+}
+
+// mappedClaimName resolves a claim's element identifier, applying any
+// per-format or per-credential mapping override.
+func mappedClaimName(claim formats.ClaimDefinition, claimMappings map[string]map[string]string) string {
+	claimName := claim.Name
+	if mapping, ok := claim.FormatMappings["mddl"]; ok {
+		claimName = mapping
+	}
+	if mappings, ok := claimMappings["mddl"]; ok {
+		if mapped, ok := mappings[claim.Name]; ok {
+			claimName = mapped
 		}
-		meta.Display = displays
-		ns[fullName] = meta
+	}
+	return claimName
+}
+
+// buildElements produces the item/field shape for a container claim's
+// children, keyed by their own (relative, non-prefixed) element name —
+// ISO 18013-5 CDDL elements like driving_privileges must be encoded as a
+// single array-of-records value, so children are described in place rather
+// than being flattened into dotted sibling claims.
+func buildElements(children []formats.ClaimDefinition, defaultLocale string, claimMappings map[string]map[string]string) map[string]ClaimMetadata {
+	elements := make(map[string]ClaimMetadata, len(children))
+	for _, child := range children {
+		elements[mappedClaimName(child, claimMappings)] = claimMetadataFor(child, defaultLocale, claimMappings)
+	}
+	return elements
+}
+
+// claimMetadataFor builds the ClaimMetadata for a single claim, recursing
+// into Elements when the claim is itself a container.
+func claimMetadataFor(claim formats.ClaimDefinition, defaultLocale string, claimMappings map[string]map[string]string) ClaimMetadata {
+	meta := ClaimMetadata{
+		Mandatory: claim.Mandatory,
+		ValueType: mapTypeToCDDL(claim.Type),
+		Display:   claimDisplay(claim, defaultLocale),
+	}
+	if isContainerClaim(claim) {
+		meta.Elements = buildElements(claim.Children, defaultLocale, claimMappings)
+	}
+	return meta
+}
+
+// flattenClaimsMDOC populates the mDOC namespace claims map from top-level
+// claim definitions. Scalar claims become individual entries; container
+// claims (object/array with children, e.g. "driving_privileges") become a
+// single entry carrying their item shape under "elements" — they must be
+// encoded as one CBOR element, not flattened into dotted leaf claims.
+func flattenClaimsMDOC(claims []formats.ClaimDefinition, ns NamespaceClaims, defaultLocale string, claimMappings map[string]map[string]string) {
+	for _, claim := range claims {
+		ns[mappedClaimName(claim, claimMappings)] = claimMetadataFor(claim, defaultLocale, claimMappings)
 	}
 }
