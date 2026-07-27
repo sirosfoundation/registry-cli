@@ -4,6 +4,7 @@ package mddl
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/sirosfoundation/registry-cli/pkg/mtcvctm/config"
@@ -236,10 +237,16 @@ func claimDisplay(claim formats.ClaimDefinition, defaultLocale string) []ClaimDi
 		Locale: defaultLocale,
 		Name:   displayName,
 	})
-	for locale, loc := range claim.Localizations {
+	locales := make([]string, 0, len(claim.Localizations))
+	for locale := range claim.Localizations {
 		if locale == defaultLocale {
 			continue
 		}
+		locales = append(locales, locale)
+	}
+	sort.Strings(locales)
+	for _, locale := range locales {
+		loc := claim.Localizations[locale]
 		label := loc.Label
 		if label == "" {
 			label = displayName
