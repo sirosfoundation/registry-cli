@@ -102,6 +102,15 @@ func TestHasPrebuiltOutput_OtherRegisteredFormats(t *testing.T) {
 	}
 }
 
+func TestHasPrebuiltOutput_IgnoresDirectory(t *testing.T) {
+	// A directory that happens to share an output file's name (e.g. an
+	// accidentally-created dir) must not count as a pre-built artifact.
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "test.vctm.json"), 0o755))
+
+	assert.False(t, hasPrebuiltOutput(dir, "test"))
+}
+
 func TestConvertDir_SkipsNonCredentialMarkdown(t *testing.T) {
 	dir := t.TempDir()
 

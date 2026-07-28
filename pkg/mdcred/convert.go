@@ -137,7 +137,8 @@ func hasCredentialFrontMatter(path string) bool {
 func hasPrebuiltOutput(outputDir, slug string) bool {
 	for _, formatName := range formats.List() {
 		outFile := parser.OutputFileName(slug, formatName)
-		if _, err := os.Stat(filepath.Join(outputDir, outFile)); err == nil {
+		info, err := os.Stat(filepath.Join(outputDir, outFile))
+		if err == nil && !info.IsDir() {
 			return true
 		}
 	}
