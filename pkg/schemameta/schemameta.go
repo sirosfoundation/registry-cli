@@ -165,8 +165,10 @@ type LegacyCredential struct {
 	Dir  string // directory containing the format files
 }
 
-// DetectLegacyCredentials scans a directory tree for VCTM files (.vctm.json or .vctm)
-// that do NOT have a corresponding schema-meta file, returning their slugs and directories.
+// DetectLegacyCredentials scans a directory tree for legacy format output
+// files (any extension in LegacyCredentialExtensions — currently .vctm.json,
+// .mdoc.json, .vc.json, or the bare legacy .vctm) that do NOT have a
+// corresponding schema-meta file, returning their slugs and directories.
 func DetectLegacyCredentials(dir string, knownSlugs map[string]bool) ([]LegacyCredential, error) {
 	seen := make(map[string]bool)
 	var creds []LegacyCredential
