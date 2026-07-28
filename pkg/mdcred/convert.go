@@ -79,8 +79,9 @@ func ConvertDirPath(dir, subPath, baseURL string) ([]ConvertResult, error) {
 
 		// Skip if any format's output already exists (pre-built). An
 		// mdoc-only credential may pre-build just *.mdoc.json with no
-		// *.vctm.json, so both are checked rather than assuming VCTM is
-		// always the pre-built artifact.
+		// *.vctm.json, so all registered formats are checked (see
+		// hasPrebuiltOutput) rather than assuming VCTM is always the
+		// pre-built artifact.
 		if hasPrebuiltOutput(outputDir, slug) {
 			return nil
 		}
