@@ -88,6 +88,20 @@ func TestHasPrebuiltOutput_None(t *testing.T) {
 	assert.False(t, hasPrebuiltOutput(dir, "test"))
 }
 
+func TestHasPrebuiltOutput_OtherRegisteredFormats(t *testing.T) {
+	// A repo may hand pre-build only a non-VCTM/non-MDOC format (e.g. w3c or
+	// jsonschema); hasPrebuiltOutput must check all registered formats, not
+	// just the two most common ones, or the other outputs get silently
+	// overwritten by a full reconversion.
+	for _, ext := range []string{".vc.json", ".schema.json"} {
+		t.Run(ext, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "test"+ext), []byte("{}"), 0o644))
+			assert.True(t, hasPrebuiltOutput(dir, "test"))
+		})
+	}
+}
+
 func TestConvertDir_SkipsNonCredentialMarkdown(t *testing.T) {
 	dir := t.TempDir()
 

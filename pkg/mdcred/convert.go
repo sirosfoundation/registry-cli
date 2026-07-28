@@ -128,13 +128,16 @@ func hasCredentialFrontMatter(path string) bool {
 }
 
 // hasPrebuiltOutput reports whether a pre-built output file already exists
-// for slug in outputDir, for any format that has one. Conversion is skipped
+// for slug in outputDir, for any registered format. Conversion is skipped
 // entirely when this is true, on the assumption the whole set of outputs was
 // pre-built by hand — not just whichever single format happened to have a
-// checked-in file.
+// checked-in file. All registered formats (not just VCTM/MDDL) are checked
+// so a hand-built w3c or jsonschema output isn't silently overwritten by a
+// full reconversion.
 func hasPrebuiltOutput(outputDir, slug string) bool {
-	for _, ext := range []string{".vctm.json", ".mdoc.json"} {
-		if _, err := os.Stat(filepath.Join(outputDir, slug+ext)); err == nil {
+	for _, formatName := range formats.List() {
+		outFile := parser.OutputFileName(slug, formatName)
+		if _, err := os.Stat(filepath.Join(outputDir, outFile)); err == nil {
 			return true
 		}
 	}
