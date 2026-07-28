@@ -122,15 +122,15 @@ func NormalizeBindingType(v string) string {
 	return v
 }
 
-// LegacyVCTMExtensions lists file extensions that indicate a legacy
+// LegacyCredentialExtensions lists file extensions that indicate a legacy
 // credential output file that can be used for credential discovery when no
 // schema-meta exists. Derived from FormatMapping (so any format that gets
 // its own file extension there is automatically picked up as a discovery
 // trigger too — VCTM is not special-cased) plus the historical bare ".vctm"
 // extension some legacy repos (e.g. SUNET/vc) use instead of ".vctm.json".
-var LegacyVCTMExtensions = legacyVCTMExtensions()
+var LegacyCredentialExtensions = legacyCredentialExtensions()
 
-func legacyVCTMExtensions() []string {
+func legacyCredentialExtensions() []string {
 	exts := make([]string, 0, len(FormatMapping)+1)
 	for ext := range FormatMapping {
 		exts = append(exts, ext)
@@ -183,7 +183,7 @@ func DetectLegacyCredentials(dir string, knownSlugs map[string]bool) ([]LegacyCr
 			return nil
 		}
 		name := d.Name()
-		for _, ext := range LegacyVCTMExtensions {
+		for _, ext := range LegacyCredentialExtensions {
 			if strings.HasSuffix(name, ext) {
 				slug := strings.TrimSuffix(name, ext)
 				if slug == "" || knownSlugs[slug] || seen[slug] {
