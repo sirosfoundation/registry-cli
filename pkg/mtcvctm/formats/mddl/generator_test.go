@@ -419,8 +419,8 @@ func TestMapTypeToCDDL(t *testing.T) {
 		{"date", "full-date"},
 		{"datetime", "tdate"},
 		{"image", "bstr"},
-		{"object", ""},
-		{"array", ""},
+		{"object", "map"},
+		{"array", "array"},
 		{"unknown", "tstr"},
 	}
 
@@ -456,6 +456,7 @@ func TestGenerator_Generate_NestedObjectClaims(t *testing.T) {
 				Name:        "address",
 				DisplayName: "Address",
 				Type:        "object",
+				Mandatory:   true,
 				Children: []formats.ClaimDefinition{
 					{Name: "street", DisplayName: "Street", Type: "string"},
 					{Name: "city", DisplayName: "City", Type: "string", Mandatory: true},
@@ -469,23 +470,164 @@ func TestGenerator_Generate_NestedObjectClaims(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	var raw map[string]interface{}
-	if err := json.Unmarshal(output, &raw); err != nil {
+	var parsed MDDL
+	if err := json.Unmarshal(output, &parsed); err != nil {
 		t.Fatalf("json.Unmarshal error = %v", err)
 	}
 
-	claims := raw["claims"].(map[string]interface{})
-	ns := claims["org.example.test"].(map[string]interface{})
+	ns := parsed.Claims["org.example.test"]
 
-	// Object children should be flattened with dot notation
-	if ns["address.street"] == nil {
-		t.Error("missing address.street (flattened claim)")
+	// The container itself must be emitted as ONE claim — an mdoc CBOR
+	// element like "address" cannot be split into sibling dotted claims.
+	address, ok := ns["address"]
+	if !ok {
+		t.Fatal("missing 'address' claim — container must not be flattened away")
 	}
-	if ns["address.city"] == nil {
-		t.Error("missing address.city (flattened claim)")
+	if !address.Mandatory {
+		t.Error("address.Mandatory should reflect the container claim, not be lost")
 	}
-	// Parent "address" should NOT be emitted directly
-	if ns["address"] != nil {
-		t.Error("container 'address' should not be emitted as a leaf claim")
+	if address.ValueType != "map" {
+		t.Errorf("address.ValueType = %q, want 'map'", address.ValueType)
+	}
+	if len(address.Display) == 0 || address.Display[0].Name != "Address" {
+		t.Errorf("address.Display should carry the container's own display, got %+v", address.Display)
+	}
+
+	// Children are described under "elements", keyed by their own (relative) name.
+	street, ok := address.Elements["street"]
+	if !ok {
+		t.Fatal("missing address.elements.street")
+	}
+	if street.ValueType != "tstr" {
+		t.Errorf("street.ValueType = %q, want 'tstr'", street.ValueType)
+	}
+	city, ok := address.Elements["city"]
+	if !ok {
+		t.Fatal("missing address.elements.city")
+	}
+	if !city.Mandatory {
+		t.Error("city should be mandatory")
+	}
+
+	// No dotted sibling claims should be emitted for the flattened form.
+	if _, ok := ns["address.street"]; ok {
+		t.Error("'address.street' should not exist — children live under address.elements")
+	}
+	if _, ok := ns["address.city"]; ok {
+		t.Error("'address.city' should not exist — children live under address.elements")
+	}
+}
+
+func TestGenerator_Generate_ArrayOfRecordsClaim(t *testing.T) {
+	g := NewGenerator()
+	cfg := &config.Config{Language: "en-US"}
+
+	// Shaped like ISO 18013-5 driving_privileges: a mandatory array of
+	// structured records, each with its own scalar (and nested array) fields.
+	cred := &formats.ParsedCredential{
+		Name:      "mDL",
+		DocType:   "org.iso.18013.5.1.mDL",
+		Namespace: "org.iso.18013.5.1",
+		Claims: []formats.ClaimDefinition{
+			{
+				Name:      "driving_privileges",
+				Type:      "array",
+				Mandatory: true,
+				Children: []formats.ClaimDefinition{
+					{Name: "vehicle_category_code", Type: "string", Mandatory: true},
+					{Name: "issue_date", Type: "date"},
+					{
+						Name: "codes",
+						Type: "array",
+						Children: []formats.ClaimDefinition{
+							{Name: "code", Type: "string"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	output, err := g.Generate(cred, cfg)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	var parsed MDDL
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		t.Fatalf("json.Unmarshal error = %v", err)
+	}
+
+	ns := parsed.Claims["org.iso.18013.5.1"]
+
+	dp, ok := ns["driving_privileges"]
+	if !ok {
+		t.Fatal("missing single 'driving_privileges' claim")
+	}
+	if !dp.Mandatory {
+		t.Error("driving_privileges should be mandatory")
+	}
+	if dp.ValueType != "array" {
+		t.Errorf("driving_privileges.ValueType = %q, want 'array'", dp.ValueType)
+	}
+	if _, ok := ns["driving_privileges.vehicle_category_code"]; ok {
+		t.Error("driving_privileges must not be flattened into dotted leaf claims")
+	}
+
+	vcc, ok := dp.Elements["vehicle_category_code"]
+	if !ok {
+		t.Fatal("missing driving_privileges.elements.vehicle_category_code")
+	}
+	if !vcc.Mandatory || vcc.ValueType != "tstr" {
+		t.Errorf("vehicle_category_code = %+v, want mandatory tstr", vcc)
+	}
+
+	// Nested arrays-within-arrays (codes) must also stay unflattened.
+	codes, ok := dp.Elements["codes"]
+	if !ok {
+		t.Fatal("missing driving_privileges.elements.codes")
+	}
+	if codes.ValueType != "array" {
+		t.Errorf("codes.ValueType = %q, want 'array'", codes.ValueType)
+	}
+	if _, ok := codes.Elements["code"]; !ok {
+		t.Error("missing driving_privileges.elements.codes.elements.code")
+	}
+}
+
+func TestGenerator_Generate_LeafArrayWithoutChildren(t *testing.T) {
+	g := NewGenerator()
+	cfg := &config.Config{Language: "en-US"}
+
+	// e.g. "nationalities": a scalar-typed array with no structured children —
+	// must get a real value_type now, not the historical "" placeholder.
+	cred := &formats.ParsedCredential{
+		Name:      "Test",
+		DocType:   "org.example.test",
+		Namespace: "org.example.test",
+		Claims: []formats.ClaimDefinition{
+			{Name: "nationalities", Type: "array"},
+		},
+	}
+
+	output, err := g.Generate(cred, cfg)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	var parsed MDDL
+	if err := json.Unmarshal(output, &parsed); err != nil {
+		t.Fatalf("json.Unmarshal error = %v", err)
+	}
+
+	claim, ok := parsed.Claims["org.example.test"]["nationalities"]
+	if !ok {
+		t.Fatal("missing 'nationalities' claim")
+	}
+	if claim.ValueType != "array" {
+		t.Errorf("nationalities.ValueType = %q, want 'array'", claim.ValueType)
+	}
+	if claim.Elements != nil {
+		t.Errorf("nationalities.Elements should be nil (no children), got %+v", claim.Elements)
 	}
 }
