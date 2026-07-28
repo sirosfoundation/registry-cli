@@ -139,7 +139,17 @@ func hasPrebuiltOutput(outputDir, slug string) bool {
 	for _, formatName := range formats.List() {
 		outFile := parser.OutputFileName(slug, formatName)
 		info, err := os.Stat(filepath.Join(outputDir, outFile))
-		if err == nil && !info.IsDir() {
+		if err == nil {
+			if !info.IsDir() {
+				return true
+			}
+			continue
+		}
+		if !os.IsNotExist(err) {
+			// Stat failed for a reason other than "doesn't exist" (e.g.
+			// permission denied). We can't reliably confirm there's no
+			// pre-built output, so err on the side of skipping conversion
+			// rather than risking an overwrite.
 			return true
 		}
 	}

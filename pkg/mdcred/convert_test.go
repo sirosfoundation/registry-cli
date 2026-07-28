@@ -111,6 +111,18 @@ func TestHasPrebuiltOutput_IgnoresDirectory(t *testing.T) {
 	assert.False(t, hasPrebuiltOutput(dir, "test"))
 }
 
+func TestHasPrebuiltOutput_StatErrorOtherThanNotExist(t *testing.T) {
+	// If Stat fails for a reason other than "doesn't exist" (e.g. a
+	// permission error, or here an ENOTDIR because outputDir is actually a
+	// file), hasPrebuiltOutput must not treat that as "no prebuilt output" —
+	// it should err on the side of skipping conversion.
+	dir := t.TempDir()
+	notADir := filepath.Join(dir, "not-a-dir")
+	require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o644))
+
+	assert.True(t, hasPrebuiltOutput(notADir, "test"))
+}
+
 func TestConvertDir_SkipsNonCredentialMarkdown(t *testing.T) {
 	dir := t.TempDir()
 
