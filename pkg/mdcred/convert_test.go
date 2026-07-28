@@ -9,53 +9,118 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestHasVCTFrontMatter_Valid(t *testing.T) {
+func TestHasCredentialFrontMatter_ValidVCT(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.md")
 	content := "---\nvct: https://example.com/test\nbackground_color: \"#003366\"\n---\n# Test Credential\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	assert.True(t, hasVCTFrontMatter(path))
+	assert.True(t, hasCredentialFrontMatter(path))
 }
 
-func TestHasVCTFrontMatter_NoFrontMatter(t *testing.T) {
+func TestHasCredentialFrontMatter_ValidDoctype(t *testing.T) {
+	// mdoc-only credentials have no vct at all — doctype: alone must trigger conversion.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.md")
+	content := "---\ndoctype: org.example.credentials.test\n---\n# Test Credential\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+
+	assert.True(t, hasCredentialFrontMatter(path))
+}
+
+func TestHasCredentialFrontMatter_NoFrontMatter(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.md")
 	content := "# Just a regular markdown file\nNo front matter here.\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	assert.False(t, hasVCTFrontMatter(path))
+	assert.False(t, hasCredentialFrontMatter(path))
 }
 
-func TestHasVCTFrontMatter_FrontMatterWithoutVCT(t *testing.T) {
+func TestHasCredentialFrontMatter_FrontMatterWithoutVCTOrDoctype(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.md")
 	content := "---\ntitle: Something\nauthor: Someone\n---\n# Not a credential\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	assert.False(t, hasVCTFrontMatter(path))
+	assert.False(t, hasCredentialFrontMatter(path))
 }
 
-func TestHasVCTFrontMatter_MissingClosingDelimiter(t *testing.T) {
+func TestHasCredentialFrontMatter_MissingClosingDelimiter(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.md")
 	content := "---\nvct: https://example.com/test\nNo closing delimiter\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	assert.False(t, hasVCTFrontMatter(path))
+	assert.False(t, hasCredentialFrontMatter(path))
 }
 
-func TestHasVCTFrontMatter_IndentedVCT(t *testing.T) {
+func TestHasCredentialFrontMatter_IndentedVCT(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.md")
 	content := "---\n  vct: https://example.com/test\n---\n# Test\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
-	assert.True(t, hasVCTFrontMatter(path))
+	assert.True(t, hasCredentialFrontMatter(path))
 }
 
-func TestHasVCTFrontMatter_NonexistentFile(t *testing.T) {
-	assert.False(t, hasVCTFrontMatter("/nonexistent/file.md"))
+func TestHasCredentialFrontMatter_NonexistentFile(t *testing.T) {
+	assert.False(t, hasCredentialFrontMatter("/nonexistent/file.md"))
+}
+
+func TestHasPrebuiltOutput_VCTM(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.vctm.json"), []byte("{}"), 0o644))
+
+	assert.True(t, hasPrebuiltOutput(dir, "test"))
+}
+
+func TestHasPrebuiltOutput_MDoc(t *testing.T) {
+	// An mdoc-only credential may pre-build just *.mdoc.json with no VCTM.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.mdoc.json"), []byte("{}"), 0o644))
+
+	assert.True(t, hasPrebuiltOutput(dir, "test"))
+}
+
+func TestHasPrebuiltOutput_None(t *testing.T) {
+	dir := t.TempDir()
+	assert.False(t, hasPrebuiltOutput(dir, "test"))
+}
+
+func TestHasPrebuiltOutput_OtherRegisteredFormats(t *testing.T) {
+	// A repo may hand pre-build only a non-VCTM/non-MDOC format (e.g. w3c or
+	// jsonschema); hasPrebuiltOutput must check all registered formats, not
+	// just the two most common ones, or the other outputs get silently
+	// overwritten by a full reconversion.
+	for _, ext := range []string{".vc.json", ".schema.json"} {
+		t.Run(ext, func(t *testing.T) {
+			dir := t.TempDir()
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "test"+ext), []byte("{}"), 0o644))
+			assert.True(t, hasPrebuiltOutput(dir, "test"))
+		})
+	}
+}
+
+func TestHasPrebuiltOutput_IgnoresDirectory(t *testing.T) {
+	// A directory that happens to share an output file's name (e.g. an
+	// accidentally-created dir) must not count as a pre-built artifact.
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, "test.vctm.json"), 0o755))
+
+	assert.False(t, hasPrebuiltOutput(dir, "test"))
+}
+
+func TestHasPrebuiltOutput_StatErrorOtherThanNotExist(t *testing.T) {
+	// If Stat fails for a reason other than "doesn't exist" (e.g. a
+	// permission error, or here an ENOTDIR because outputDir is actually a
+	// file), hasPrebuiltOutput must not treat that as "no prebuilt output" —
+	// it should err on the side of skipping conversion.
+	dir := t.TempDir()
+	notADir := filepath.Join(dir, "not-a-dir")
+	require.NoError(t, os.WriteFile(notADir, []byte("x"), 0o644))
+
+	assert.True(t, hasPrebuiltOutput(notADir, "test"))
 }
 
 func TestConvertDir_SkipsNonCredentialMarkdown(t *testing.T) {
@@ -96,6 +161,49 @@ func TestConvertDir_SkipsPrebuilt(t *testing.T) {
 	results, err := ConvertDir(dir, "https://example.com")
 	require.NoError(t, err)
 	assert.Empty(t, results)
+}
+
+func TestConvertDir_SkipsPrebuiltMDoc(t *testing.T) {
+	dir := t.TempDir()
+
+	// mdoc-only credential: doctype, no vct at all.
+	md := "---\ndoctype: org.example.credentials.test\n---\n# Test Credential\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.md"), []byte(md), 0o644))
+
+	// Pre-built .mdoc.json with no .vctm.json — should still cause skip.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.mdoc.json"), []byte("{}"), 0o644))
+
+	results, err := ConvertDir(dir, "https://example.com")
+	require.NoError(t, err)
+	assert.Empty(t, results)
+}
+
+func TestConvertDir_ConvertsDoctypeOnlyCredential(t *testing.T) {
+	dir := t.TempDir()
+
+	// mdoc-only credential: doctype and namespace, no vct at all.
+	md := `---
+doctype: org.example.credentials.test
+namespace: org.example.credentials.test
+formats: mddl
+---
+
+# Test Credential
+
+An mdoc-only credential with no sd-jwt counterpart.
+
+## Claims
+
+- ` + "`family_name`" + ` (string): Family name [mandatory]
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.md"), []byte(md), 0o644))
+
+	results, err := ConvertDir(dir, "https://example.com")
+	require.NoError(t, err)
+	require.NotEmpty(t, results, "doctype: alone should trigger conversion even with no vct:")
+
+	assert.Equal(t, "test", results[0].Slug)
+	assert.Contains(t, results[0].Files, "mddl")
 }
 
 func TestConvertDir_SkipsHiddenDirs(t *testing.T) {

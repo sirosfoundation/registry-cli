@@ -425,6 +425,19 @@ func TestDetectLegacyCredentials(t *testing.T) {
 	assert.Equal(t, 2, len(creds))
 }
 
+func TestDetectLegacyCredentials_MDocOnly(t *testing.T) {
+	// An mdoc-only credential (no VCTM at all) must still be discovered as a
+	// legacy credential — LegacyCredentialExtensions is derived from
+	// FormatMapping, not hardcoded to VCTM's extensions.
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mdl_mdoc.mdoc.json"), []byte("{}"), 0o644))
+
+	creds, err := DetectLegacyCredentials(dir, nil)
+	require.NoError(t, err)
+	require.Len(t, creds, 1)
+	assert.Equal(t, "mdl_mdoc", creds[0].Slug)
+}
+
 func TestDetectLegacyCredentials_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	creds, err := DetectLegacyCredentials(dir, nil)

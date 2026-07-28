@@ -25,10 +25,11 @@ type ConvertResult struct {
 }
 
 // ConvertDir scans dir (and subdirectories) for markdown credential files
-// (those with vct: in YAML front matter) and converts them to VCTM format
-// files alongside the source markdown. It returns the list of converted
-// credentials. Already-existing output files are skipped (the repo may have
-// pre-built them).
+// (those with vct: or doctype: in YAML front matter — mdoc-only credentials
+// have no vct) and converts them to VCTM/MDDL/etc. format files alongside
+// the source markdown. It returns the list of converted credentials.
+// Already-existing output files are skipped (the repo may have pre-built
+// them).
 func ConvertDir(dir, baseURL string) ([]ConvertResult, error) {
 	return ConvertDirPath(dir, "", baseURL)
 }
@@ -69,13 +70,19 @@ func ConvertDirPath(dir, subPath, baseURL string) ([]ConvertResult, error) {
 		slug := strings.TrimSuffix(d.Name(), ".md")
 		outputDir := filepath.Dir(path)
 
-		// Quick check: does this markdown have a vct: front matter?
-		if !hasVCTFrontMatter(path) {
+		// Quick check: does this markdown declare a credential identifier?
+		// vct: for sd-jwt credentials, doctype: for mdoc-only credentials
+		// (which have no vct at all).
+		if !hasCredentialFrontMatter(path) {
 			return nil
 		}
 
-		// Skip if .vctm.json already exists (pre-built)
-		if _, statErr := os.Stat(filepath.Join(outputDir, slug+".vctm.json")); statErr == nil {
+		// Skip if any format's output already exists (pre-built). An
+		// mdoc-only credential may pre-build just *.mdoc.json with no
+		// *.vctm.json, so all registered formats are checked (see
+		// hasPrebuiltOutput) rather than assuming VCTM is always the
+		// pre-built artifact.
+		if hasPrebuiltOutput(outputDir, slug) {
 			return nil
 		}
 
@@ -95,9 +102,10 @@ func ConvertDirPath(dir, subPath, baseURL string) ([]ConvertResult, error) {
 	return results, nil
 }
 
-// hasVCTFrontMatter checks if a markdown file starts with YAML front matter
-// containing a vct: field.
-func hasVCTFrontMatter(path string) bool {
+// hasCredentialFrontMatter checks if a markdown file starts with YAML front
+// matter declaring vct: (sd-jwt credentials) or doctype: (mdoc-only
+// credentials, which have no vct).
+func hasCredentialFrontMatter(path string) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
@@ -112,7 +120,36 @@ func hasVCTFrontMatter(path string) bool {
 	}
 	frontMatter := content[3 : 3+end]
 	for _, line := range strings.Split(frontMatter, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "vct:") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "vct:") || strings.HasPrefix(trimmed, "doctype:") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasPrebuiltOutput reports whether a pre-built output file already exists
+// for slug in outputDir, for any registered format. Conversion is skipped
+// entirely when this is true, on the assumption the whole set of outputs was
+// pre-built by hand — not just whichever single format happened to have a
+// checked-in file. All registered formats (not just VCTM/MDDL) are checked
+// so a hand-built w3c or jsonschema output isn't silently overwritten by a
+// full reconversion.
+func hasPrebuiltOutput(outputDir, slug string) bool {
+	for _, formatName := range formats.List() {
+		outFile := parser.OutputFileName(slug, formatName)
+		info, err := os.Stat(filepath.Join(outputDir, outFile))
+		if err == nil {
+			if !info.IsDir() {
+				return true
+			}
+			continue
+		}
+		if !os.IsNotExist(err) {
+			// Stat failed for a reason other than "doesn't exist" (e.g.
+			// permission denied). We can't reliably confirm there's no
+			// pre-built output, so err on the side of skipping conversion
+			// rather than risking an overwrite.
 			return true
 		}
 	}

@@ -374,8 +374,12 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		return nil, fmt.Errorf("walking repo dir: %w", walkErr)
 	}
 
-	// Second pass: discover legacy VCTM-only credentials (no schema-meta)
-	// Walk subdirectories as well
+	// Second pass: discover legacy credentials with no schema-meta, via any
+	// output file extension in schemameta.FormatMapping (currently
+	// .vctm.json, .mdoc.json, .vc.json) or the legacy bare ".vctm" extension
+	// — not just VCTM. This does not cover every registered format (e.g.
+	// jsonschema's ".schema.json" isn't a discovery trigger). Walk
+	// subdirectories as well.
 	legacyWalkRoot := repoDir
 	if repo.Path != "" {
 		legacyWalkRoot = filepath.Join(repoDir, repo.Path)

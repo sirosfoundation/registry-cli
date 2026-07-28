@@ -122,12 +122,25 @@ func NormalizeBindingType(v string) string {
 	return v
 }
 
-// LegacyVCTMExtensions lists file extensions that indicate a legacy VCTM file
-// (JSON content) that can be used for credential discovery when no schema-meta exists.
-var LegacyVCTMExtensions = []string{".vctm.json", ".vctm"}
+// LegacyCredentialExtensions lists file extensions that indicate a legacy
+// credential output file that can be used for credential discovery when no
+// schema-meta exists. Derived from FormatMapping (so any format that gets
+// its own file extension there is automatically picked up as a discovery
+// trigger too — VCTM is not special-cased) plus the historical bare ".vctm"
+// extension some legacy repos (e.g. SUNET/vc) use instead of ".vctm.json".
+var LegacyCredentialExtensions = legacyCredentialExtensions()
 
-// InferLegacy builds a SchemaMeta for a credential discovered via VCTM files
-// only (no schema-meta.yaml). These will not pass TS11 validation.
+func legacyCredentialExtensions() []string {
+	exts := make([]string, 0, len(FormatMapping)+1)
+	for ext := range FormatMapping {
+		exts = append(exts, ext)
+	}
+	exts = append(exts, ".vctm")
+	return exts
+}
+
+// InferLegacy builds a SchemaMeta for a credential discovered via format
+// output files only (no schema-meta.yaml). These will not pass TS11 validation.
 func InferLegacy(org, slug, baseURL string, formats []string, formatFiles map[string]string) *SchemaMeta {
 	sm := &SchemaMeta{
 		ID:               GenerateID(org, slug),
@@ -152,8 +165,10 @@ type LegacyCredential struct {
 	Dir  string // directory containing the format files
 }
 
-// DetectLegacyCredentials scans a directory tree for VCTM files (.vctm.json or .vctm)
-// that do NOT have a corresponding schema-meta file, returning their slugs and directories.
+// DetectLegacyCredentials scans a directory tree for legacy format output
+// files (any extension in LegacyCredentialExtensions — currently .vctm.json,
+// .mdoc.json, .vc.json, or the bare legacy .vctm) that do NOT have a
+// corresponding schema-meta file, returning their slugs and directories.
 func DetectLegacyCredentials(dir string, knownSlugs map[string]bool) ([]LegacyCredential, error) {
 	seen := make(map[string]bool)
 	var creds []LegacyCredential
@@ -170,7 +185,7 @@ func DetectLegacyCredentials(dir string, knownSlugs map[string]bool) ([]LegacyCr
 			return nil
 		}
 		name := d.Name()
-		for _, ext := range LegacyVCTMExtensions {
+		for _, ext := range LegacyCredentialExtensions {
 			if strings.HasSuffix(name, ext) {
 				slug := strings.TrimSuffix(name, ext)
 				if slug == "" || knownSlugs[slug] || seen[slug] {
