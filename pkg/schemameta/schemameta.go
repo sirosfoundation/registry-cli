@@ -122,12 +122,25 @@ func NormalizeBindingType(v string) string {
 	return v
 }
 
-// LegacyVCTMExtensions lists file extensions that indicate a legacy VCTM file
-// (JSON content) that can be used for credential discovery when no schema-meta exists.
-var LegacyVCTMExtensions = []string{".vctm.json", ".vctm"}
+// LegacyVCTMExtensions lists file extensions that indicate a legacy
+// credential output file that can be used for credential discovery when no
+// schema-meta exists. Derived from FormatMapping (so any format that gets
+// its own file extension there is automatically picked up as a discovery
+// trigger too — VCTM is not special-cased) plus the historical bare ".vctm"
+// extension some legacy repos (e.g. SUNET/vc) use instead of ".vctm.json".
+var LegacyVCTMExtensions = legacyVCTMExtensions()
 
-// InferLegacy builds a SchemaMeta for a credential discovered via VCTM files
-// only (no schema-meta.yaml). These will not pass TS11 validation.
+func legacyVCTMExtensions() []string {
+	exts := make([]string, 0, len(FormatMapping)+1)
+	for ext := range FormatMapping {
+		exts = append(exts, ext)
+	}
+	exts = append(exts, ".vctm")
+	return exts
+}
+
+// InferLegacy builds a SchemaMeta for a credential discovered via format
+// output files only (no schema-meta.yaml). These will not pass TS11 validation.
 func InferLegacy(org, slug, baseURL string, formats []string, formatFiles map[string]string) *SchemaMeta {
 	sm := &SchemaMeta{
 		ID:               GenerateID(org, slug),

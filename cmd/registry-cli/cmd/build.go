@@ -374,7 +374,8 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		return nil, fmt.Errorf("walking repo dir: %w", walkErr)
 	}
 
-	// Second pass: discover legacy VCTM-only credentials (no schema-meta)
+	// Second pass: discover legacy credentials with no schema-meta, via any
+	// known format's output file (VCTM, MDDL, w3c, ...), not just VCTM.
 	// Walk subdirectories as well
 	legacyWalkRoot := repoDir
 	if repo.Path != "" {
