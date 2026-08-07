@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -33,6 +34,23 @@ func lastCommitTime(repoDir string, relPaths []string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// relPathsUnder converts absolute paths to repoDir-relative paths, for use
+// as git log pathspecs. Empty paths and paths outside repoDir are skipped.
+func relPathsUnder(repoDir string, paths ...string) []string {
+	rels := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		rel, err := filepath.Rel(repoDir, p)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			continue
+		}
+		rels = append(rels, rel)
+	}
+	return rels
 }
 
 // injectToken injects a token into an HTTPS git URL for authentication.

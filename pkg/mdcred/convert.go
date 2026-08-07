@@ -20,8 +20,9 @@ import (
 
 // ConvertResult describes a credential converted from markdown.
 type ConvertResult struct {
-	Slug  string            // base name without .md extension
-	Files map[string]string // format name → output file path
+	Slug       string            // base name without .md extension
+	SourcePath string            // absolute path to the source .md file
+	Files      map[string]string // format name → output file path
 }
 
 // ConvertDir scans dir (and subdirectories) for markdown credential files
@@ -188,8 +189,9 @@ func convertFile(mdPath, slug, outputDir, baseURL string) (*ConvertResult, error
 	}
 
 	result := &ConvertResult{
-		Slug:  slug,
-		Files: make(map[string]string),
+		Slug:       slug,
+		SourcePath: mdPath,
+		Files:      make(map[string]string),
 	}
 
 	for formatName, data := range outputs {
