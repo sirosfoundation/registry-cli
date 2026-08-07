@@ -147,6 +147,62 @@ paths:
                 $ref: '#/components/schemas/SchemaMeta'
         '404':
           description: Attestation schema with the specified ID not found.
+  /orgs:
+    get:
+      operationId: listOrganizations
+      summary: List known organizations (SIROS extension, not part of TS11)
+      description: |
+        Returns an index of the organizations contributing to this registry
+        instance, each with a link to its organization-scoped schema list.
+
+        This endpoint and /orgs/{org}/schemas are SIROS-specific extensions
+        to the TS11 API surface: TS11 does not define an "organization"
+        concept. Filtering is expressed as a separate resource collection
+        rather than a new field on SchemaMeta, so every individual schema
+        object returned by this registry remains unchanged from — and as
+        TS11-conformant as — the one served by GET /schemas. Clients that
+        only implement the normative TS11 surface can safely ignore these
+        endpoints.
+      tags:
+        - Organizations (SIROS extension)
+      responses:
+        '200':
+          description: Index of known organizations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgIndex'
+  /orgs/{org}/schemas:
+    get:
+      operationId: listSchemasByOrganization
+      summary: List attestation schemas for one organization (SIROS extension, not part of TS11)
+      description: |
+        Returns the same PaginatedSchemaList shape as GET /schemas, filtered
+        to TS11-compliant schemas contributed by the given organization.
+        See /orgs for the non-normative extension note.
+
+        To query a *set* of organizations, fetch each organization's list
+        separately and merge client-side — there is no single static
+        resource for an arbitrary combination, by design (this endpoint is
+        served as a pre-built static file, not a live query).
+      tags:
+        - Organizations (SIROS extension)
+      parameters:
+        - name: org
+          in: path
+          required: true
+          description: The organization identifier, as listed in GET /orgs.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: TS11-compliant schemas contributed by this organization.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSchemaList'
+        '404':
+          description: Unknown organization.
   /.well-known/jwks.json:
     get:
       operationId: getJWKS
@@ -296,6 +352,26 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SchemaMeta'
+    OrgIndex:
+      type: object
+      description: SIROS extension — not part of the normative TS11 data model.
+      properties:
+        total:
+          type: integer
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: Organization identifier, as used in /orgs/{org}/schemas and in the registry's /<org>/ pages.
+              schemaCount:
+                type: integer
+                description: Number of TS11-compliant schemas contributed by this organization.
+              schemasURL:
+                type: string
+                format: uri
     LegacyRegistryPayload:
       type: object
       properties:

@@ -107,6 +107,29 @@ func runSign(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// 2c. Sign organization-scoped schema lists (SIROS extension — see
+	// writeOrgScopedOutputs in build.go). Each orgs/{org}/schemas.json is
+	// already a complete list payload, so SignFile (not SignAggregate) is
+	// the right primitive here.
+	orgsDir := filepath.Join(flagInput, "orgs")
+	if orgEntries, err := os.ReadDir(orgsDir); err == nil {
+		signedOrgs := 0
+		for _, entry := range orgEntries {
+			if !entry.IsDir() {
+				continue
+			}
+			orgSchemasPath := filepath.Join(orgsDir, entry.Name(), "schemas.json")
+			if _, statErr := os.Stat(orgSchemasPath); statErr != nil {
+				continue
+			}
+			if _, signErr := signer.SignFile(orgSchemasPath); signErr != nil {
+				return fmt.Errorf("signing org schemas for %s: %w", entry.Name(), signErr)
+			}
+			signedOrgs++
+		}
+		logger.Info("signed org-scoped schema lists", "count", signedOrgs)
+	}
+
 	// 3. Sign aggregate (schemas list)
 	aggregatePath := flagAggregate
 	if aggregatePath == "" {

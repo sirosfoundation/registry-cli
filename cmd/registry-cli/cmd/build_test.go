@@ -166,6 +166,64 @@ func TestWriteOutputs(t *testing.T) {
 	assert.Equal(t, float64(1), payload["total"])
 }
 
+func TestWriteOrgScopedOutputs(t *testing.T) {
+	dir := t.TempDir()
+
+	compliantA := &schemameta.SchemaMeta{ID: "id-a1", Version: "1.0.0"}
+	compliantB := &schemameta.SchemaMeta{ID: "id-b1", Version: "1.0.0"}
+	nonCompliantA := &schemameta.SchemaMeta{ID: "id-a2", Version: "0.1.0"}
+
+	credentials := []render.CredentialData{
+		{Org: "orgA", Slug: "cred1", Schema: compliantA, TS11Compliant: true},
+		{Org: "orgA", Slug: "cred2", Schema: nonCompliantA, TS11Compliant: false},
+		{Org: "orgB", Slug: "cred1", Schema: compliantB, TS11Compliant: true},
+		// orgC has credentials but none are TS11-compliant — should still
+		// appear in the index, with an empty schema list.
+		{Org: "orgC", Slug: "cred1", Schema: &schemameta.SchemaMeta{ID: "id-c1"}, TS11Compliant: false},
+	}
+
+	err := writeOrgScopedOutputs(dir, "https://example.com", credentials)
+	require.NoError(t, err)
+
+	// orgA: one compliant schema, one excluded
+	dataA, err := os.ReadFile(filepath.Join(dir, "api", "v1", "orgs", "orgA", "schemas.json"))
+	require.NoError(t, err)
+	var payloadA map[string]any
+	require.NoError(t, json.Unmarshal(dataA, &payloadA))
+	assert.Equal(t, float64(1), payloadA["total"])
+	items := payloadA["data"].([]any)
+	require.Len(t, items, 1)
+	assert.Equal(t, "id-a1", items[0].(map[string]any)["id"])
+
+	// orgB: one compliant schema
+	dataB, err := os.ReadFile(filepath.Join(dir, "api", "v1", "orgs", "orgB", "schemas.json"))
+	require.NoError(t, err)
+	var payloadB map[string]any
+	require.NoError(t, json.Unmarshal(dataB, &payloadB))
+	assert.Equal(t, float64(1), payloadB["total"])
+
+	// orgC: no compliant schemas, but the resource still exists with an empty list
+	dataC, err := os.ReadFile(filepath.Join(dir, "api", "v1", "orgs", "orgC", "schemas.json"))
+	require.NoError(t, err)
+	var payloadC map[string]any
+	require.NoError(t, json.Unmarshal(dataC, &payloadC))
+	assert.Equal(t, float64(0), payloadC["total"])
+
+	// orgs.json index lists all three orgs, including the empty one
+	indexData, err := os.ReadFile(filepath.Join(dir, "api", "v1", "orgs.json"))
+	require.NoError(t, err)
+	var index map[string]any
+	require.NoError(t, json.Unmarshal(indexData, &index))
+	assert.Equal(t, float64(3), index["total"])
+	entries := index["data"].([]any)
+	require.Len(t, entries, 3)
+	names := make([]string, len(entries))
+	for i, e := range entries {
+		names[i] = e.(map[string]any)["name"].(string)
+	}
+	assert.ElementsMatch(t, []string{"orgA", "orgB", "orgC"}, names)
+}
+
 func TestWriteLegacyOutput(t *testing.T) {
 	dir := t.TempDir()
 	schemas := []*schemameta.SchemaMeta{

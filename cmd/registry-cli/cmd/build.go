@@ -133,6 +133,11 @@ func runBuild(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing vctm-registry.json: %w", writeErr)
 	}
 
+	// 6c. Write organization-scoped API views (SIROS extension, see writeOrgScopedOutputs)
+	if writeErr := writeOrgScopedOutputs(flagOutput, flagBaseURL, credentials); writeErr != nil {
+		return fmt.Errorf("writing org-scoped outputs: %w", writeErr)
+	}
+
 	renderer, err := render.NewRenderer(flagTemplates)
 	if err != nil {
 		return fmt.Errorf("creating renderer: %w", err)
@@ -626,6 +631,84 @@ func writeOutputs(outputDir, baseURL string, schemas []*schemameta.SchemaMeta) e
 	}
 
 	return nil
+}
+
+// orgSummary describes one organization in the /api/v1/orgs.json index.
+// This is a SIROS-specific extension: TS11 has no concept of an
+// "organization" — it is registry.siros.org's own provenance grouping,
+// expressed as a separate resource collection rather than a field on
+// SchemaMeta (which is a closed schema — see writeOrgScopedOutputs).
+type orgSummary struct {
+	Name        string `json:"name"`
+	SchemaCount int    `json:"schemaCount"`
+	SchemasURL  string `json:"schemasURL"`
+}
+
+// writeOrgScopedOutputs writes /api/v1/orgs.json (an index of known
+// organizations) and, for each organization, /api/v1/orgs/{org}/schemas.json
+// — the same PaginatedSchemaList shape as the global /api/v1/schemas.json,
+// filtered to that organization's TS11-compliant schemas.
+//
+// This is a SIROS extension to the TS11 API surface: filtering happens by
+// which resource collection a client requests, not by a new field on
+// SchemaMeta, so every individual schema object remains byte-for-byte
+// identical to (and as TS11-conformant as) the one served from the global
+// list. It works on both static hosting (files written here are served
+// as-is by GitHub Pages) and `registry-cli serve` (same files, via the
+// static file fallback).
+func writeOrgScopedOutputs(outputDir, baseURL string, credentials []render.CredentialData) error {
+	orgSchemas := make(map[string][]*schemameta.SchemaMeta)
+	orgSeen := make(map[string]bool)
+	var orgOrder []string
+	for _, cred := range credentials {
+		if !orgSeen[cred.Org] {
+			orgSeen[cred.Org] = true
+			orgOrder = append(orgOrder, cred.Org)
+		}
+		if cred.TS11Compliant && cred.Schema != nil {
+			orgSchemas[cred.Org] = append(orgSchemas[cred.Org], cred.Schema)
+		}
+	}
+
+	orgsDir := filepath.Join(outputDir, "api", "v1", "orgs")
+	var index []orgSummary
+	for _, org := range orgOrder {
+		schemas := orgSchemas[org]
+		schemasURL := fmt.Sprintf("%s/api/v1/orgs/%s/schemas.json", baseURL, org)
+		index = append(index, orgSummary{Name: org, SchemaCount: len(schemas), SchemasURL: schemasURL})
+
+		orgDir := filepath.Join(orgsDir, org)
+		if err := os.MkdirAll(orgDir, 0o755); err != nil {
+			return fmt.Errorf("creating org dir %s: %w", org, err)
+		}
+		listPayload := map[string]any{
+			"total":  len(schemas),
+			"limit":  len(schemas),
+			"offset": 0,
+			"data":   schemas,
+		}
+		data, err := json.MarshalIndent(listPayload, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshaling schema list for org %s: %w", org, err)
+		}
+		if err := os.WriteFile(filepath.Join(orgDir, "schemas.json"), data, 0o644); err != nil {
+			return fmt.Errorf("writing org schemas for %s: %w", org, err)
+		}
+	}
+
+	apiDir := filepath.Join(outputDir, "api", "v1")
+	if err := os.MkdirAll(apiDir, 0o755); err != nil {
+		return err
+	}
+	indexPayload := map[string]any{
+		"total": len(index),
+		"data":  index,
+	}
+	indexData, err := json.MarshalIndent(indexPayload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling orgs index: %w", err)
+	}
+	return os.WriteFile(filepath.Join(apiDir, "orgs.json"), indexData, 0o644)
 }
 
 // writeLegacyOutput writes a legacy vctm-registry.json that includes ALL credentials
