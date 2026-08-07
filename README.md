@@ -16,7 +16,7 @@ produces a static site with:
 
 - Per-credential detail pages with TS11 metadata
 - Rendered rulebooks (from co-located `rulebook.md`)
-- A JSON API (`/api/v1/schemas.json`) with per-schema endpoints
+- A JSON API (`/api/v1/schemas.json`) with per-schema and per-organization endpoints
 - An OpenAPI specification
 - Optional JWS signing of all API responses
 
@@ -268,6 +268,12 @@ credentials/
 ### Publishing Without Schema-Meta
 
 Credentials discovered without a `.schema-meta.yaml` file appear in the **human-readable site** but are **excluded** from TS11 API responses (`/api/v1/schemas.json`). This allows incremental migration to TS11 compliance.
+
+### Organization-Scoped API Filtering
+
+`registry-cli build` also writes `/api/v1/orgs.json` (an index of contributing organizations) and `/api/v1/orgs/<org>/schemas.json` (that organization's TS11-compliant schemas, same shape as `/api/v1/schemas.json`). This is a **SIROS extension**, not part of the normative TS11 API — TS11 has no "organization" concept, and its `SchemaMeta` JSON Schema forbids additional properties, so filtering is expressed as a separate resource collection rather than a new field on the schema object. Every schema returned from an org-scoped list is identical to the one served from the global list.
+
+There is no static resource for a *set* of organizations — fetch each one's list and merge client-side.
 
 ## Packages
 
