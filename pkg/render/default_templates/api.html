@@ -31,6 +31,20 @@
     <p>Returns a JWS compact serialization containing a single <code>SchemaMeta</code> object.</p>
     <pre>curl {{.BaseURL}}/api/v1/schemas/{uuid}.jwt</pre>
 
+    <h3>GET /orgs <em>(SIROS extension — not part of TS11)</em></h3>
+    <p>Returns an index of the organizations contributing to this registry, each with a link to its
+    organization-scoped schema list.</p>
+    <pre>curl {{.BaseURL}}/api/v1/orgs.json</pre>
+
+    <h3>GET /orgs/{org}/schemas <em>(SIROS extension — not part of TS11)</em></h3>
+    <p>Returns the same paginated list shape as <code>GET /schemas</code>, filtered to TS11-compliant
+    schemas contributed by one organization. Every schema object is identical to the one served from
+    the global list — filtering happens by which resource you request, not by a new field on
+    <code>SchemaMeta</code>, so nothing here affects TS11 conformance.</p>
+    <pre>curl {{.BaseURL}}/api/v1/orgs/{org}/schemas.json</pre>
+    <p>To query a <em>set</em> of organizations, fetch each one's list and merge client-side — there is
+    no static resource for an arbitrary combination.</p>
+
     <h3>Signature Verification</h3>
     <p>Public keys are published as a JWKS at
     <a href="{{.BaseURL}}/api/v1/.well-known/jwks.json"><code>{{.BaseURL}}/api/v1/.well-known/jwks.json</code></a>.</p>
