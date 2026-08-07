@@ -11,37 +11,37 @@ import (
 // jsonSchema represents the subset of JSON Schema 2020-12 we need to parse
 // from EUDI-style credential validation schemas.
 type jsonSchema struct {
-	Schema      string                    `json:"$schema"`
-	ID          string                    `json:"$id"`
-	Title       string                    `json:"title"`
-	Description string                    `json:"description"`
-	Type        string                    `json:"type"`
-	Version     string                    `json:"version"`
-	Properties  map[string]*propertyDef   `json:"properties"`
-	Required    []string                  `json:"required"`
-	Defs        map[string]*jsonSchema    `json:"$defs"`
+	Schema      string                  `json:"$schema"`
+	ID          string                  `json:"$id"`
+	Title       string                  `json:"title"`
+	Description string                  `json:"description"`
+	Type        string                  `json:"type"`
+	Version     string                  `json:"version"`
+	Properties  map[string]*propertyDef `json:"properties"`
+	Required    []string                `json:"required"`
+	Defs        map[string]*jsonSchema  `json:"$defs"`
 }
 
 // propertyDef represents a property definition within a JSON Schema.
 type propertyDef struct {
-	Type        string              `json:"type"`
-	Const       interface{}         `json:"const"`
-	Enum        []interface{}       `json:"enum"`
-	Description string              `json:"description"`
-	Format      string              `json:"format"`
-	Examples    []interface{}       `json:"examples"`
+	Type        string                  `json:"type"`
+	Const       interface{}             `json:"const"`
+	Enum        []interface{}           `json:"enum"`
+	Description string                  `json:"description"`
+	Format      string                  `json:"format"`
+	Examples    []interface{}           `json:"examples"`
 	Properties  map[string]*propertyDef `json:"properties"`
-	Items       *propertyDef        `json:"items"`
-	Required    []string            `json:"required"`
+	Items       *propertyDef            `json:"items"`
+	Required    []string                `json:"required"`
 }
 
 // vctmOutput is the VCTM JSON structure per draft-ietf-oauth-sd-jwt-vc §6.
 type vctmOutput struct {
-	VCT         string             `json:"vct"`
-	Name        string             `json:"name,omitempty"`
-	Description string             `json:"description,omitempty"`
-	Display     []vctmDisplay      `json:"display,omitempty"`
-	Claims      []vctmClaim        `json:"claims,omitempty"`
+	VCT         string        `json:"vct"`
+	Name        string        `json:"name,omitempty"`
+	Description string        `json:"description,omitempty"`
+	Display     []vctmDisplay `json:"display,omitempty"`
+	Claims      []vctmClaim   `json:"claims,omitempty"`
 }
 
 type vctmDisplay struct {
@@ -68,8 +68,8 @@ type vctmImage struct {
 }
 
 type vctmSVGTemplate struct {
-	URI        string              `json:"uri"`
-	Properties *vctmTemplateProps  `json:"properties,omitempty"`
+	URI        string             `json:"uri"`
+	Properties *vctmTemplateProps `json:"properties,omitempty"`
 }
 
 type vctmTemplateProps struct {
@@ -78,11 +78,11 @@ type vctmTemplateProps struct {
 }
 
 type vctmClaim struct {
-	Path        []interface{}   `json:"path"`
-	Display     []claimDisplay  `json:"display,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Mandatory   bool            `json:"mandatory,omitempty"`
-	SD          string          `json:"sd,omitempty"`
+	Path        []interface{}  `json:"path"`
+	Display     []claimDisplay `json:"display,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Mandatory   bool           `json:"mandatory,omitempty"`
+	SD          string         `json:"sd,omitempty"`
 }
 
 type claimDisplay struct {
@@ -116,7 +116,7 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[s
 	}
 
 	var schema jsonSchema
-	if err := json.Unmarshal(data, &schema); err != nil {
+	if err = json.Unmarshal(data, &schema); err != nil {
 		return nil, fmt.Errorf("parsing JSON Schema: %w", err)
 	}
 
