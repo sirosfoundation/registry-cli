@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/yuin/goldmark"
@@ -44,6 +45,11 @@ type CredentialData struct {
 	SourceURL  string
 	SourceOrg  string
 	SourceRepo string
+
+	// LastUpdated is the committer date (RFC 3339) of the most recent git
+	// commit that touched this credential's source files. Empty if unknown
+	// (e.g. a local file:// source with no git history).
+	LastUpdated string
 }
 
 // AttributeData holds a single attribute (claim) with references to the
@@ -397,6 +403,13 @@ func templateFuncs() template.FuncMap {
 		},
 		"safeURL": func(u string) template.URL {
 			return template.URL(u)
+		},
+		"formatDate": func(rfc3339 string) string {
+			t, err := time.Parse(time.RFC3339, rfc3339)
+			if err != nil {
+				return rfc3339
+			}
+			return t.Format("Jan 2, 2006")
 		},
 	}
 }

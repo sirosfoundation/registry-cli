@@ -80,13 +80,17 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	gitToken := os.Getenv("GITHUB_TOKEN")
 
 	var schemas []*schemameta.SchemaMeta
+	lastUpdated := make(map[string]string)
 	for _, repo := range repos {
-		repoSchemas, processErr := processRepo(repo, workDir, flagBaseURL, gitToken, logger)
+		repoSchemas, repoLastUpdated, processErr := processRepo(repo, workDir, flagBaseURL, gitToken, logger)
 		if processErr != nil {
 			logger.Warn("skipping repo", "url", repo.URL, "error", processErr)
 			continue
 		}
 		schemas = append(schemas, repoSchemas...)
+		for id, t := range repoLastUpdated {
+			lastUpdated[id] = t
+		}
 	}
 	logger.Info("discovered schemas", "count", len(schemas))
 
@@ -119,7 +123,7 @@ func runBuild(cmd *cobra.Command, args []string) error {
 	}
 
 	// 6. Render HTML site (all credentials, with TS11 compliance flag)
-	credentials, err := buildCredentialData(repos, workDir, flagOutput, schemas, flagBaseURL, ts11Compliant)
+	credentials, err := buildCredentialData(repos, workDir, flagOutput, schemas, flagBaseURL, ts11Compliant, lastUpdated)
 	if err != nil {
 		return fmt.Errorf("building credential data: %w", err)
 	}
@@ -242,12 +246,15 @@ func buildResolvers() []discovery.Resolver {
 	return resolvers
 }
 
-func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string, logger *slog.Logger) ([]*schemameta.SchemaMeta, error) {
+// processRepo discovers credentials in repo and returns their SchemaMeta
+// envelopes plus a lastUpdated map (schema ID → RFC 3339 committer date of
+// the most recent commit touching that credential's own source files).
+func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string, logger *slog.Logger) ([]*schemameta.SchemaMeta, map[string]string, error) {
 	// Validate repo.Path if set: must be relative, no traversal
 	if repo.Path != "" {
 		clean := filepath.Clean(repo.Path)
 		if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" || containsDotDot(clean) {
-			return nil, fmt.Errorf("source path must be a relative path within the repo: %q", repo.Path)
+			return nil, nil, fmt.Errorf("source path must be a relative path within the repo: %q", repo.Path)
 		}
 	}
 
@@ -257,7 +264,7 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		org = extractOrg(repo.URL)
 	}
 	if org == "" {
-		return nil, fmt.Errorf("cannot determine org from URL %q", repo.URL)
+		return nil, nil, fmt.Errorf("cannot determine org from URL %q", repo.URL)
 	}
 
 	var repoDir string
@@ -266,7 +273,7 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		localPath := strings.TrimPrefix(repo.URL, "file://")
 		absPath, err := filepath.Abs(localPath)
 		if err != nil {
-			return nil, fmt.Errorf("resolving local path %q: %w", localPath, err)
+			return nil, nil, fmt.Errorf("resolving local path %q: %w", localPath, err)
 		}
 		repoDir = absPath
 		logger.Info("using local directory", "path", repoDir)
@@ -274,7 +281,7 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		// Clone repo
 		repoDir = filepath.Join(workDir, org, extractRepoName(repo.URL))
 		if err := cloneRepo(repo.URL, repo.Branch, repoDir, gitToken); err != nil {
-			return nil, fmt.Errorf("cloning %s: %w", repo.URL, err)
+			return nil, nil, fmt.Errorf("cloning %s: %w", repo.URL, err)
 		}
 	}
 
@@ -297,12 +304,15 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 	if err != nil {
 		logger.Warn("markdown credential conversion", "error", err)
 	}
+	mdSourceBySlug := make(map[string]string, len(converted))
 	for _, c := range converted {
 		logger.Info("converted markdown credential", "slug", c.Slug, "formats", len(c.Files))
+		mdSourceBySlug[c.Slug] = c.SourcePath
 	}
 
 	// Find schema-meta files (walk into subdirectories)
 	var schemas []*schemameta.SchemaMeta
+	lastUpdated := make(map[string]string)
 	knownSlugs := make(map[string]bool)
 
 	// Determine walk root: restrict to repo.Path if set
@@ -366,12 +376,24 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		schemas = append(schemas, sm)
 		knownSlugs[slug] = true
 
+		sourcePaths := []string{path}
+		for _, p := range formatFiles {
+			sourcePaths = append(sourcePaths, p)
+		}
+		if mdPath, ok := mdSourceBySlug[slug]; ok {
+			sourcePaths = append(sourcePaths, mdPath)
+		}
+		if _, statErr := os.Stat(rulebookPath); statErr == nil {
+			sourcePaths = append(sourcePaths, rulebookPath)
+		}
+		lastUpdated[sm.ID] = lastCommitTime(repoDir, relPathsUnder(repoDir, sourcePaths...))
+
 		logger.Info("processed credential",
 			"org", org, "slug", slug, "id", sm.ID,
 			"formats", sm.SupportedFormats)
 		return nil
 	}); walkErr != nil {
-		return nil, fmt.Errorf("walking repo dir: %w", walkErr)
+		return nil, nil, fmt.Errorf("walking repo dir: %w", walkErr)
 	}
 
 	// Second pass: discover legacy credentials with no schema-meta, via any
@@ -401,21 +423,35 @@ func processRepo(repo discovery.ResolvedRepo, workDir, baseURL, gitToken string,
 		sm := schemameta.InferLegacy(org, lc.Slug, baseURL, formats, formatFiles)
 		schemas = append(schemas, sm)
 
+		sourcePaths := make([]string, 0, len(formatFiles)+1)
+		for _, p := range formatFiles {
+			sourcePaths = append(sourcePaths, p)
+		}
+		if mdPath, ok := mdSourceBySlug[lc.Slug]; ok {
+			sourcePaths = append(sourcePaths, mdPath)
+		}
+		if _, statErr := os.Stat(filepath.Join(lc.Dir, "rulebook.md")); statErr == nil {
+			sourcePaths = append(sourcePaths, filepath.Join(lc.Dir, "rulebook.md"))
+		} else if _, statErr := os.Stat(filepath.Join(repoDir, "rulebook.md")); statErr == nil {
+			sourcePaths = append(sourcePaths, filepath.Join(repoDir, "rulebook.md"))
+		}
+		lastUpdated[sm.ID] = lastCommitTime(repoDir, relPathsUnder(repoDir, sourcePaths...))
+
 		logger.Info("processed legacy credential",
 			"org", org, "slug", lc.Slug, "id", sm.ID,
 			"formats", sm.SupportedFormats)
 	}
 
-	return schemas, nil
+	return schemas, lastUpdated, nil
 }
 
 // processRepoWithPlugin uses a named repo plugin to discover credentials,
 // then converts the plugin's DiscoveredCredential output into SchemaMeta
 // objects for the existing pipeline.
-func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoDir, org, baseURL string, logger *slog.Logger) ([]*schemameta.SchemaMeta, error) {
+func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoDir, org, baseURL string, logger *slog.Logger) ([]*schemameta.SchemaMeta, map[string]string, error) {
 	plugin, ok := repoplugin.Get(layoutName)
 	if !ok {
-		return nil, fmt.Errorf("unknown repo layout plugin: %q (available: %v)", layoutName, repoplugin.DefaultRegistry.List())
+		return nil, nil, fmt.Errorf("unknown repo layout plugin: %q (available: %v)", layoutName, repoplugin.DefaultRegistry.List())
 	}
 
 	logger.Info("using repo plugin", "layout", layoutName, "plugin", plugin.Description())
@@ -439,12 +475,23 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 
 	discovered, err := plugin.Discover(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("plugin %q discover: %w", layoutName, err)
+		return nil, nil, fmt.Errorf("plugin %q discover: %w", layoutName, err)
 	}
 
 	// Convert DiscoveredCredentials to SchemaMeta objects
 	var schemas []*schemameta.SchemaMeta
+	lastUpdated := make(map[string]string)
 	for _, cred := range discovered {
+		// Capture the plugin's original (pre-staging) source paths before
+		// they get copied into the slug-based credDir below — these are the
+		// real, git-tracked files, unlike the staged copies.
+		sourcePaths := make([]string, 0, len(cred.FormatFiles)+1)
+		if cred.RulebookPath != "" {
+			sourcePaths = append(sourcePaths, cred.RulebookPath)
+		}
+		for _, p := range cred.FormatFiles {
+			sourcePaths = append(sourcePaths, p)
+		}
 		// Stage all credential files into a slug-based directory so the
 		// enrichment pass (buildCredentialData → findCredDir → orgSlugFromID)
 		// can locate them using the normalized slug.
@@ -523,13 +570,14 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 		}
 
 		schemas = append(schemas, sm)
+		lastUpdated[sm.ID] = lastCommitTime(repoDir, relPathsUnder(repoDir, sourcePaths...))
 		logger.Info("plugin processed credential",
 			"org", cred.Org, "slug", cred.Slug, "id", sm.ID,
 			"formats", sm.SupportedFormats,
 			"ts11", cred.SchemaMetaSource != nil)
 	}
 
-	return schemas, nil
+	return schemas, lastUpdated, nil
 }
 
 // formatIdentifierToExt maps TS11 format identifiers back to file extensions.
@@ -787,17 +835,20 @@ func extractRepoName(cloneURL string) string {
 	return ""
 }
 
+// cloneRepo clones the full history of the repo (no --depth) so that
+// per-credential "last updated" timestamps can be derived from `git log`
+// on the individual credential files.
 func cloneRepo(repoURL, branch, dest, token string) error {
 	authURL := injectToken(repoURL, token)
 	if branch != "" {
-		return execGit("clone", "--depth", "1", "--branch", branch, "--", authURL, dest)
+		return execGit("clone", "--branch", branch, "--", authURL, dest)
 	}
-	return execGit("clone", "--depth", "1", "--", authURL, dest)
+	return execGit("clone", "--", authURL, dest)
 }
 
 // buildCredentialData constructs render.CredentialData for each schema,
 // including VCTM content, format files, and rulebook rendering.
-func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir string, schemas []*schemameta.SchemaMeta, baseURL string, ts11Compliant map[string]bool) ([]render.CredentialData, error) {
+func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir string, schemas []*schemameta.SchemaMeta, baseURL string, ts11Compliant map[string]bool, lastUpdated map[string]string) ([]render.CredentialData, error) {
 	var credentials []render.CredentialData
 	seenSlugs := make(map[string]bool)
 
@@ -815,6 +866,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			Slug:          slug,
 			Schema:        sm,
 			TS11Compliant: ts11Compliant[sm.ID],
+			LastUpdated:   lastUpdated[sm.ID],
 		}
 
 		// Find the repo containing this credential
