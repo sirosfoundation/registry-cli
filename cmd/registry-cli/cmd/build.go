@@ -787,12 +787,15 @@ func extractRepoName(cloneURL string) string {
 	return ""
 }
 
+// cloneRepo clones the full history of the repo (no --depth) so that
+// per-credential "last updated" timestamps can be derived from `git log`
+// on the individual credential files.
 func cloneRepo(repoURL, branch, dest, token string) error {
 	authURL := injectToken(repoURL, token)
 	if branch != "" {
-		return execGit("clone", "--depth", "1", "--branch", branch, "--", authURL, dest)
+		return execGit("clone", "--branch", branch, "--", authURL, dest)
 	}
-	return execGit("clone", "--depth", "1", "--", authURL, dest)
+	return execGit("clone", "--", authURL, dest)
 }
 
 // buildCredentialData constructs render.CredentialData for each schema,
@@ -917,6 +920,11 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			cred.AvailableFormats = buildFormatInfo(org, slug, credDir)
 			copyFormatFiles(credDir, outputDir, org, slug)
 
+			// Last-updated timestamp: latest commit touching any of this
+			// credential's source files (empty for repos with no git history,
+			// e.g. local file:// sources).
+			cred.LastUpdated = lastCommitTime(repoDir, credentialRelPaths(repoDir, credDir, slug, rulebookPath))
+
 			break
 		}
 
@@ -927,6 +935,23 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 	}
 
 	return credentials, nil
+}
+
+// credentialRelPaths returns repoDir-relative paths for all of a
+// credential's source files (format files, schema-meta, rulebook), for use
+// as git log pathspecs when computing a last-updated timestamp.
+func credentialRelPaths(repoDir, credDir, slug, rulebookPath string) []string {
+	matches, _ := filepath.Glob(filepath.Join(credDir, slug+".*"))
+	if _, err := os.Stat(rulebookPath); err == nil {
+		matches = append(matches, rulebookPath)
+	}
+	rels := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if rel, err := filepath.Rel(repoDir, m); err == nil {
+			rels = append(rels, rel)
+		}
+	}
+	return rels
 }
 
 // findCredDir searches repoDir (and subdirectories) for credential files
