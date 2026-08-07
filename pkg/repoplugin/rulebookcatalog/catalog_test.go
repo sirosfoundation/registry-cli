@@ -199,9 +199,9 @@ func TestDiscoverWithMockRepo(t *testing.T) {
 
 	// Create a PID schema
 	pidSchema := map[string]interface{}{
-		"$schema": "https://json-schema.org/draft/2020-12/schema",
-		"title":   "ds002 - Person Identification Data (PID) – SD-JWT VC payload",
-		"type":    "object",
+		"$schema":  "https://json-schema.org/draft/2020-12/schema",
+		"title":    "ds002 - Person Identification Data (PID) – SD-JWT VC payload",
+		"type":     "object",
 		"required": []string{"vct", "given_name", "family_name", "birthdate"},
 		"properties": map[string]interface{}{
 			"vct":         map[string]interface{}{"type": "string", "const": "urn:eudi:pid:1"},
