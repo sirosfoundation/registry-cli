@@ -13,6 +13,6 @@ jobs:
   sbom:
     uses: sirosfoundation/.github/.github/workflows/sbom.yml@main
     permissions:
-      contents: write
-      packages: read
-      id-token: write
+      contents: write        # attach the SBOM to a release
+      id-token: write        # Cosign keyless signing
+      security-events: write # SARIF upload — required by the reusable workflow
