@@ -266,6 +266,7 @@ func (r *Renderer) renderToFile(path, templateName string, data any) error {
 // Uses a strict policy that blocks dangerous elements while allowing
 // safe formatting (bold, italic, links, tables, etc).
 func RenderMarkdown(markdown []byte) (template.HTML, error) {
+	markdown = stripFrontMatter(markdown)
 	md := goldmark.New(
 		goldmark.WithExtensions(extension.Table),
 	)
@@ -275,6 +276,25 @@ func RenderMarkdown(markdown []byte) (template.HTML, error) {
 	}
 	sanitized := SanitizeHTML(buf.Bytes())
 	return template.HTML(sanitized), nil
+}
+
+// stripFrontMatter removes a leading YAML front matter block ("---" on the
+// first line, closed by a line holding only "---" or "...") so it is not
+// rendered as body text. Input without a closed block is returned unchanged.
+func stripFrontMatter(md []byte) []byte {
+	text := bytes.TrimPrefix(md, []byte("\xef\xbb\xbf"))
+	first, rest, ok := bytes.Cut(text, []byte("\n"))
+	if !ok || string(bytes.TrimRight(first, " \t\r")) != "---" {
+		return md
+	}
+	for len(rest) > 0 {
+		line, next, _ := bytes.Cut(rest, []byte("\n"))
+		if t := string(bytes.TrimRight(line, " \t\r")); t == "---" || t == "..." {
+			return next
+		}
+		rest = next
+	}
+	return md
 }
 
 // SanitizeHTML applies strict sanitization to HTML content from untrusted sources.

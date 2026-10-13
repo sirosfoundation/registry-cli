@@ -4,6 +4,7 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
@@ -607,4 +608,31 @@ func TestRenderAttributes_Empty(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(outDir, "docs", "attributes.html"))
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "No attributes found")
+}
+
+func TestRenderMarkdownStripsFrontMatter(t *testing.T) {
+	src := "---\ntitle: \"Rulebook\"\nauthor: \"A & B\"\n---\n\n# Introduction\n\nBody.\n"
+	got, err := RenderMarkdown([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(got)
+	if strings.Contains(out, "title:") || strings.Contains(out, "author:") {
+		t.Errorf("front matter leaked into output: %s", out)
+	}
+	if !strings.Contains(out, "<h1>Introduction</h1>") || !strings.Contains(out, "Body.") {
+		t.Errorf("body missing from output: %s", out)
+	}
+}
+
+func TestRenderMarkdownKeepsHorizontalRuleWithoutFrontMatter(t *testing.T) {
+	for _, src := range []string{"---\nno closing rule\n", "Intro\n\n---\n\nAfter\n"} {
+		got, err := RenderMarkdown([]byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(got), "<hr>") && !strings.Contains(string(got), "no closing rule") {
+			t.Errorf("content lost for %q: %s", src, got)
+		}
+	}
 }
