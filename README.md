@@ -151,6 +151,29 @@ rulebooks/
 4. Maps `rulebooks/rb-<slug>/README.md` as the governance rulebook
 5. Detects matching mDOC schemas from `data-schemas/mdoc/`
 6. Normalizes legacy `dsNNN-` filename prefixes (e.g., `ds002-pid` → `pid`)
+7. Discovers card and logo artwork per credential and publishes it with the site (see below)
+
+**Asset conventions:**
+
+Each credential `<slug>` may carry artwork. The plugin looks in these places, first match wins per asset:
+
+| Asset | Preferred location | Also found in |
+|-------|--------------------|---------------|
+| Card (light) | `assets/<slug>/card.svg` | `data-schemas/sd-jwt/<slug>-card.svg`, `display/<slug>-card.svg`, `display/<slug>.svg` |
+| Card (dark) | `assets/<slug>/card-dark.svg` | |
+| Logo | `assets/<slug>/logo.svg` or `logo.png` | `data-schemas/sd-jwt/<slug>-logo.{svg,png}`, `display/<slug>-logo.{svg,png}` |
+
+**Published URLs:** every asset is copied next to the credential's VCTM and the VCTM references it by absolute URL (`--base-url` with a trailing slash trimmed):
+
+```
+<out>/<org>/<slug>-svg_template.svg        https://<base-url>/<org>/<slug>-svg_template.svg       (card.svg)
+<out>/<org>/<slug>-svg_template_dark.svg   https://<base-url>/<org>/<slug>-svg_template_dark.svg  (card-dark.svg)
+<out>/<org>/<slug>-logo.svg|png            https://<base-url>/<org>/<slug>-logo.svg|png           (logo.svg|png)
+```
+
+The VCTM lists the cards under `display[].rendering.svg_templates[]` (light and dark colour scheme) and the logo under `display[].rendering.simple.logo`. Published asset types are `svg`, `png`, `jpg`, `jpeg` and `webp`. Credential format files keep their own names and content; an asset is always written under its `<slug>-<key>` name.
+
+SVG cards are checked before publication, see [SVG and Image URI Validation](#svg-and-image-uri-validation). A card that fails a check is skipped with a logged warning and its reference is removed from the VCTM, so the published VCTM contains working links only.
 
 **Plugin options:**
 
@@ -284,6 +307,7 @@ There is no static resource for a *set* of organizations — fetch each one's li
 | `pkg/repoplugin/defaultlayout` | Default plugin: co-located schema-meta + format files |
 | `pkg/repoplugin/rulebookcatalog` | EUDI-style catalog plugin: JSON Schema → VCTM conversion |
 | `pkg/schemameta` | TS11 schema-meta parsing, inference, validation |
+| `pkg/assets` | SVG validation and publication of layout plugin assets |
 | `pkg/render` | HTML template rendering, markdown conversion |
 | `pkg/jwssign` | JWS signing (dev, SoftHSM, YubiHSM) via PKCS#11 |
 | `pkg/apihandler` | TS11 REST API with filtering, pagination, JWS-signed responses |
@@ -362,6 +386,16 @@ Credential metadata (VCTM) may reference images for logos and backgrounds:
 - **Blocked:** `data:` URIs (inline data), `blob:` URIs, `javascript:` protocols, `file://` URIs
 
 Invalid image URIs are silently removed from rendered credential pages. The implementation is in `pkg/render/vctm.go::SanitizeVCTM()`.
+
+**Published SVG assets.** The registry serves SVG cards and logos discovered by layout plugins from its own origin, so every SVG is validated with a real XML tokenizer (`encoding/xml`, `pkg/assets/svg.go::ValidateSVG`) before it is published. A card is published when it:
+
+- is a well-formed XML document with an `<svg>` root element of at most 2 MiB;
+- contains only static graphic elements (no `<script>`, `<foreignObject>`, `<iframe>`, `<object>`, `<embed>`);
+- carries no event-handler attributes (`onload`, `onclick`, any `on*`);
+- uses `href`, `xlink:href` and `src` only for same-document `#id` fragments, which also covers `<use>` of external documents;
+- contains no `javascript:` or `data:` URIs, and no external `url(...)`, `@import` or entity declarations in `style` elements and attributes.
+
+A rejected card is skipped with a logged warning that names the file and the reason, and its reference is removed from the VCTM. Absolute `https://` and `http://` asset URIs pass `SanitizeVCTM`, so published assets appear on the rendered credential pages.
 
 #### Testing
 

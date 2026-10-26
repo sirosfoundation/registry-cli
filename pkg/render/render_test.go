@@ -636,3 +636,22 @@ func TestRenderMarkdownKeepsHorizontalRuleWithoutFrontMatter(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizeVCTM_KeepsAbsolutePublishedAssetURIs(t *testing.T) {
+	v := &VCTMData{Display: []VCTMDisplay{{
+		Logo: &VCTMImage{URI: "https://registry.example.org/org/pid-logo.png"},
+		Rendering: &VCTMRendering{SVGTemplates: []VCTMSVGTemplate{
+			{URI: "https://registry.example.org/org/pid-svg_template.svg"},
+			{URI: "/org/pid-svg_template_dark.svg"},
+			{URI: "data:image/svg+xml;base64,AAAA"},
+		}},
+	}}}
+	SanitizeVCTM(v)
+	if v.Display[0].Logo == nil {
+		t.Fatal("absolute logo URI was dropped")
+	}
+	got := v.Display[0].Rendering.SVGTemplates
+	if len(got) != 1 || got[0].URI != "https://registry.example.org/org/pid-svg_template.svg" {
+		t.Fatalf("unexpected templates after sanitize: %+v", got)
+	}
+}

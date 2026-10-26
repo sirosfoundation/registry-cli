@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/sirosfoundation/registry-cli/pkg/assets"
 	"github.com/sirosfoundation/registry-cli/pkg/attributes"
 	"github.com/sirosfoundation/registry-cli/pkg/discovery"
 	"github.com/sirosfoundation/registry-cli/pkg/mdcred"
@@ -51,6 +52,7 @@ func init() {
 
 func runBuild(cmd *cobra.Command, args []string) error {
 	logger := slog.Default()
+	flagBaseURL = strings.TrimRight(flagBaseURL, "/")
 
 	// 1. Load sources manifest
 	manifest, err := discovery.LoadManifest(flagSources)
@@ -469,6 +471,7 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 	options["source_url"] = repo.URL
 	options["source_repo"] = extractRepoName(repo.URL)
 
+	baseURL = strings.TrimRight(baseURL, "/")
 	ctx := repoplugin.Context{
 		RepoDir:      repoDir,
 		SubPath:      repo.Path,
@@ -506,10 +509,23 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 			continue
 		}
 
+		// Stage discovered assets (SVG templates, logos) next to the
+		// credential. Assets that fail validation are not staged and their
+		// references are dropped from the generated VCTM.
+		rejected := stageAssets(cred, credDir, org, baseURL, logger)
+		vctmBytes := cred.GeneratedVCTM
+		if len(rejected) > 0 && len(vctmBytes) > 0 {
+			if pruned, dropErr := assets.DropURIs(vctmBytes, rejected); dropErr != nil {
+				logger.Warn("dropping rejected asset references", "slug", cred.Slug, "error", dropErr)
+			} else {
+				vctmBytes = pruned
+			}
+		}
+
 		// Stage generated VCTM
-		if len(cred.GeneratedVCTM) > 0 {
+		if len(vctmBytes) > 0 {
 			vctmPath := filepath.Join(credDir, cred.Slug+".vctm.json")
-			_ = os.WriteFile(vctmPath, cred.GeneratedVCTM, 0o644)
+			_ = os.WriteFile(vctmPath, vctmBytes, 0o644)
 		}
 
 		// Stage rulebook
@@ -541,23 +557,9 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 
 		// If we generated a VCTM but no dc+sd-jwt format file was staged,
 		// use the generated VCTM as the dc+sd-jwt format file.
-		if len(cred.GeneratedVCTM) > 0 {
+		if len(vctmBytes) > 0 {
 			if _, hasFmt := stagedFiles["dc+sd-jwt"]; !hasFmt {
 				stagedFiles["dc+sd-jwt"] = filepath.Join(credDir, cred.Slug+".vctm.json")
-			}
-		}
-
-		// Stage discovered assets (SVG templates, logos) to the output
-		// directory alongside the credential so they're served at the
-		// URLs referenced in the generated VCTM.
-		for assetKey, srcPath := range cred.Assets {
-			ext := filepath.Ext(srcPath)
-			assetFilename := cred.Slug + "-" + assetKey + ext
-			dstPath := filepath.Join(credDir, assetFilename)
-			if _, statErr := os.Stat(dstPath); os.IsNotExist(statErr) {
-				if data, readErr := os.ReadFile(srcPath); readErr == nil {
-					_ = os.WriteFile(dstPath, data, 0o644)
-				}
 			}
 		}
 
@@ -583,6 +585,37 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 	}
 
 	return schemas, lastUpdated, nil
+}
+
+// stageAssets copies the assets discovered by a layout plugin into credDir as
+// <slug>-<key><ext>, validating each file first. It returns the absolute URIs
+// of assets that were rejected so that their references can be removed from
+// the VCTM. Staged copies are always refreshed so that a rebuild never
+// publishes stale content.
+func stageAssets(cred repoplugin.DiscoveredCredential, credDir, org, baseURL string, logger *slog.Logger) map[string]bool {
+	rejected := make(map[string]bool)
+	for assetKey, srcPath := range cred.Assets {
+		ext := filepath.Ext(srcPath)
+		filename := assets.Filename(cred.Slug, assetKey, ext)
+		dstPath := filepath.Join(credDir, filename)
+		uri := assets.URL(baseURL, org, filename)
+
+		data, readErr := os.ReadFile(srcPath)
+		if readErr == nil {
+			readErr = assets.Check(filename, data)
+		}
+		if readErr != nil {
+			logger.Warn("rejecting asset", "org", org, "slug", cred.Slug, "asset", assetKey, "file", srcPath, "reason", readErr)
+			_ = os.Remove(dstPath)
+			rejected[uri] = true
+			continue
+		}
+		if writeErr := os.WriteFile(dstPath, data, 0o644); writeErr != nil {
+			logger.Warn("staging asset", "slug", cred.Slug, "asset", assetKey, "error", writeErr)
+			rejected[uri] = true
+		}
+	}
+	return rejected
 }
 
 // formatIdentifierToExt maps TS11 format identifiers back to file extensions.
@@ -1051,6 +1084,7 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			// Build available formats and copy format files to output
 			cred.AvailableFormats = buildFormatInfo(org, slug, credDir)
 			copyFormatFiles(credDir, outputDir, org, slug)
+			assets.Publish(credDir, outputDir, org, slug, logger)
 
 			break
 		}

@@ -284,3 +284,21 @@ func TestDiscoverWithMockRepo(t *testing.T) {
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError + 1}))
 }
+
+func TestDiscoverAssets_TrimsTrailingSlashOfBaseURL(t *testing.T) {
+	repo := t.TempDir()
+	dir := filepath.Join(repo, "assets", "pid")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "card.svg"), []byte("<svg/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	assets, files := discoverAssets(repo, filepath.Join(repo, "data-schemas", "sd-jwt"), "pid", "ds002-pid", "https://r.example/", "org")
+	if got, want := assets["svg_template"], "https://r.example/org/pid-svg_template.svg"; got != want {
+		t.Errorf("uri = %q, want %q", got, want)
+	}
+	if files["svg_template"] == "" {
+		t.Error("asset file not recorded")
+	}
+}

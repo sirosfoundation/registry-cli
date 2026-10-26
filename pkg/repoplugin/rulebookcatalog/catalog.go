@@ -184,7 +184,7 @@ func discoverAssets(repoDir, sdJWTDir, slug, rawSlug, baseURL, org string) (asse
 		if _, err := os.Stat(c.path); err == nil {
 			ext := filepath.Ext(c.path)
 			assetFilename := slug + "-" + c.key + ext
-			assetURL := fmt.Sprintf("%s/%s/%s", baseURL, org, assetFilename)
+			assetURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(baseURL, "/"), org, assetFilename)
 			assets[c.key] = assetURL
 			assetFiles[c.key] = c.path
 		}
