@@ -29,6 +29,7 @@ func TestValidateSVG_Rejections(t *testing.T) {
 		{"onload", `<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>`},
 		{"onclick upper", svg(`<rect ONCLICK="x()"/>`)},
 		{"javascript href", svg(`<a href="javascript:alert(1)"><rect/></a>`)},
+		{"vbscript href", svg(`<a href="vbscript:msgbox(1)"><rect/></a>`)},
 		{"javascript obfuscated", svg(`<a xlink:href=" java&#9;script:alert(1)"><rect/></a>`)},
 		{"data uri image", svg(`<image href="data:image/png;base64,AAAA"/>`)},
 		{"data uri in fill", svg(`<rect fill="data:text/html,x"/>`)},

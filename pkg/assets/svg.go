@@ -113,8 +113,10 @@ func checkAttributes(element string, attrs []xml.Attr) error {
 		if referenceAttributes[local] && !strings.HasPrefix(value, "#") && value != "" {
 			return fmt.Errorf("external reference in %q attribute: %q", a.Name.Local, truncate(a.Value))
 		}
-		if strings.HasPrefix(value, "javascript:") {
-			return fmt.Errorf("javascript: URI in %q attribute", a.Name.Local)
+		for _, scheme := range []string{"javascript:", "vbscript:"} {
+			if strings.HasPrefix(value, scheme) {
+				return fmt.Errorf("%s URI in %q attribute", scheme, a.Name.Local)
+			}
 		}
 		if strings.HasPrefix(value, "data:") {
 			return fmt.Errorf("data: URI in %q attribute", a.Name.Local)
@@ -147,7 +149,7 @@ func checkCSS(css string) error {
 	if strings.Contains(l, "@import") {
 		return errors.New("@import is not allowed")
 	}
-	if strings.Contains(l, "javascript:") || strings.Contains(l, "expression(") {
+	if strings.Contains(l, "javascript:") || strings.Contains(l, "vbscript:") || strings.Contains(l, "expression(") {
 		return errors.New("script reference in CSS")
 	}
 	rest := l
