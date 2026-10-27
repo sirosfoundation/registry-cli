@@ -141,17 +141,45 @@ rulebooks/
   rb-<slug>/README.md          (EUDI-template governance document)
 ```
 
-**What it does:**
-1. Discovers credentials from `data-schemas/sd-jwt/*-sd-jwt.json`
-2. Extracts `vct` from `properties.vct.const` or `properties.vct.examples[0]`
-3. Converts JSON Schema properties → VCTM claims:
+**Discovery rule:**
+
+A credential type exists for every slug that has at least one data schema:
+`data-schemas/sd-jwt/<name>-sd-jwt.json` and/or `data-schemas/mdoc/<name>-mdoc.json`.
+The slug is the file name without its `-sd-jwt.json` / `-mdoc.json` suffix and
+without a leading `dsNNN-` (case is kept: `ds009-eInvoice` becomes `eInvoice`).
+A type with an SD-JWT VC schema follows the SD-JWT flow below, with its mdoc
+schema attached as a second format. A type with only an mdoc schema follows the
+mdoc-only flow.
+
+**What it does for a type with an SD-JWT VC schema:**
+1. Extracts `vct` from `properties.vct.const` or `properties.vct.examples[0]`
+2. Converts JSON Schema properties → VCTM claims:
    - `required` array → `mandatory: true`
    - Descriptions with "selectively disclosable" → `sd: "always"`
    - Property names → display labels (snake_case → Title Case)
-4. Maps `rulebooks/rb-<slug>/README.md` as the governance rulebook
-5. Detects matching mDOC schemas from `data-schemas/mdoc/`
-6. Normalizes legacy `dsNNN-` filename prefixes (e.g., `ds002-pid` → `pid`)
-7. Discovers card and logo artwork per credential and publishes it with the site (see below)
+3. Maps `rulebooks/rb-<slug>/README.md` as the governance rulebook
+4. Attaches the matching mDOC schema from `data-schemas/mdoc/` as a second format
+5. Normalizes legacy `dsNNN-` filename prefixes (e.g., `ds002-pid` → `pid`)
+6. Discovers card and logo artwork per credential and publishes it with the site (see below)
+
+**What it does for an mdoc-only type:**
+1. Publishes the mdoc schema as `<org>/<slug>.mdoc.json`
+2. Publishes the TS11 entry with `supportedFormats: ["mso_mdoc"]`, a `schemaURIs` entry for the mdoc file and, with the source `options` (`attestation_los`, `binding_type`, `version`), the same governance metadata as the other types; `rulebookURI` points at the rendered rulebook when `rulebooks/rb-<slug>/README.md` exists
+3. Publishes the catalogue entry (`.well-known/vctm-registry.json`, with the `.mdoc.json` file as its metadata link) and the credential detail page, which shows the display name, description, document type, format downloads, rulebook link, source and the raw mdoc schema
+4. Publishes the artwork found by the asset conventions below through the same validated asset path (`<org>/<slug>-svg_template.svg`, `-svg_template_dark.svg`, `-logo.*`)
+5. Skips a type whose mdoc schema is not valid JSON, logs a warning and continues with the other types
+
+A type without VCTM has no claims, so it appears in the TS11 schemas API,
+the catalogue and the organisation page, while the attribute catalogue lists the
+claims of VCTM-based types.
+
+**mdoc schema fields that are read:**
+
+| Field | Used for |
+|-------|----------|
+| `title` | display name on the detail page, organisation page and catalogue entry (the slug when absent) |
+| `description` | description on the detail page and catalogue entry |
+| `docType` | document type shown on the detail page: a top-level `docType` string, `properties.docType.const`, or the first `docType` property with a `const` found in the document (WE BUILD schemas declare it under `$defs`) |
 
 **Asset conventions:**
 

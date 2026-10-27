@@ -4,7 +4,9 @@
 // These repositories organize credential data as:
 //
 //	data-schemas/sd-jwt/<name>-sd-jwt.json   (JSON Schema 2020-12 validation)
-//	data-schemas/mdoc/<name>-mdoc.json       (mDOC validation schema)
+//	data-schemas/mdoc/<name>-mdoc.json       (mDOC validation schema; types
+//	                                          without an SD-JWT schema are
+//	                                          published as mdoc-only)
 //	rulebooks/rb-<slug>/README.md            (governance document)
 //
 // This plugin converts JSON Schema validation definitions into VCTM format
@@ -18,6 +20,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sirosfoundation/registry-cli/pkg/mdocinfo"
 	"github.com/sirosfoundation/registry-cli/pkg/repoplugin"
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
 )
@@ -43,31 +46,48 @@ func (r *RulebookCatalog) Discover(ctx repoplugin.Context) ([]repoplugin.Discove
 		repoDir = filepath.Join(repoDir, ctx.SubPath)
 	}
 
-	// Discover SD-JWT schemas
 	sdJWTDir := filepath.Join(repoDir, "data-schemas", "sd-jwt")
 	mdocDir := filepath.Join(repoDir, "data-schemas", "mdoc")
 	rulebooksDir := filepath.Join(repoDir, "rulebooks")
 
-	// Walk SD-JWT schemas as primary credential discovery
-	entries, err := os.ReadDir(sdJWTDir)
+	sdEntries, err := readSchemaDir(sdJWTDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			logger.Info("no data-schemas/sd-jwt directory found, skipping")
-			return nil, nil
-		}
 		return nil, fmt.Errorf("reading sd-jwt schema dir: %w", err)
+	}
+	mdocEntries, err := readSchemaDir(mdocDir)
+	if err != nil {
+		return nil, fmt.Errorf("reading mdoc schema dir: %w", err)
+	}
+	if len(sdEntries) == 0 && len(mdocEntries) == 0 {
+		logger.Info("no data-schemas/sd-jwt or data-schemas/mdoc schemas found, skipping")
+		return nil, nil
 	}
 
 	var results []repoplugin.DiscoveredCredential
+	sdSlugs := make(map[string]bool)
 
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "-sd-jwt.json") {
+	// mdoc files by normalized slug, so an SD-JWT type finds its mdoc schema
+	// when only one of the two file names carries a dsNNN- prefix.
+	mdocBySlug := make(map[string]string)
+	for _, name := range mdocEntries {
+		if strings.HasSuffix(name, "-mdoc.json") {
+			slug := normalizeSlug(strings.TrimSuffix(name, "-mdoc.json"))
+			if _, ok := mdocBySlug[slug]; !ok {
+				mdocBySlug[slug] = name
+			}
+		}
+	}
+
+	// SD-JWT VC schemas: each one is a credential type.
+	for _, entry := range sdEntries {
+		if !strings.HasSuffix(entry, "-sd-jwt.json") {
 			continue
 		}
 
-		filename := entry.Name()
+		filename := entry
 		rawSlug := strings.TrimSuffix(filename, "-sd-jwt.json")
 		slug := normalizeSlug(rawSlug)
+		sdSlugs[slug] = true
 
 		schemaPath := filepath.Join(sdJWTDir, filename)
 
@@ -107,22 +127,13 @@ func (r *RulebookCatalog) Discover(ctx repoplugin.Context) ([]repoplugin.Discove
 				break
 			}
 		}
-
-		// Look for matching rulebook
-		rulebookCandidates := []string{
-			filepath.Join(rulebooksDir, "rb-"+slug, "README.md"),
-			filepath.Join(rulebooksDir, "rb-"+rawSlug, "README.md"),
-		}
-		for _, rbPath := range rulebookCandidates {
-			if _, statErr := os.Stat(rbPath); statErr == nil {
-				cred.RulebookPath = rbPath
-				break
+		if _, found := cred.FormatFiles["mso_mdoc"]; !found {
+			if name, ok := mdocBySlug[slug]; ok {
+				cred.FormatFiles["mso_mdoc"] = filepath.Join(mdocDir, name)
 			}
 		}
 
-		// Build SchemaMetaSource from options (source-level defaults)
-		cred.SchemaMetaSource = buildSchemaMetaFromOptions(ctx.Options, slug, ctx.BaseURL, ctx.Organization, cred.RulebookPath != "")
-
+		r.finishCredential(&cred, ctx, rulebooksDir, rawSlug)
 		results = append(results, cred)
 		logger.Info("discovered credential from catalog",
 			"org", ctx.Organization, "slug", slug,
@@ -130,9 +141,90 @@ func (r *RulebookCatalog) Discover(ctx repoplugin.Context) ([]repoplugin.Discove
 			"has_rulebook", cred.RulebookPath != "")
 	}
 
+	// mdoc-only types: a data-schemas/mdoc/<name>-mdoc.json whose slug has no
+	// SD-JWT VC schema. They publish the mdoc schema, the rulebook and the
+	// assets; there is no VCTM.
+	mdocSeen := make(map[string]string)
+	for _, filename := range mdocEntries {
+		if !strings.HasSuffix(filename, "-mdoc.json") {
+			continue
+		}
+		rawSlug := strings.TrimSuffix(filename, "-mdoc.json")
+		slug := normalizeSlug(rawSlug)
+		if sdSlugs[slug] {
+			continue
+		}
+		if prev, dup := mdocSeen[slug]; dup {
+			logger.Warn("skipping mdoc schema: slug already provided by another file",
+				"file", filename, "slug", slug, "kept", prev)
+			continue
+		}
+		mdocPath := filepath.Join(mdocDir, filename)
+		data, readErr := os.ReadFile(mdocPath)
+		if readErr == nil {
+			_, readErr = mdocinfo.Parse(data)
+		}
+		if readErr != nil {
+			logger.Warn("skipping credential: mdoc schema is unreadable",
+				"file", filename, "slug", slug, "error", readErr)
+			continue
+		}
+		mdocSeen[slug] = filename
+
+		_, assetFiles := discoverAssets(repoDir, sdJWTDir, slug, rawSlug, ctx.BaseURL, ctx.Organization)
+		cred := repoplugin.DiscoveredCredential{
+			Org:         ctx.Organization,
+			Slug:        slug,
+			FormatFiles: map[string]string{"mso_mdoc": mdocPath},
+			Assets:      assetFiles,
+			SourceURL:   ctx.Options["source_url"],
+			SourceRepo:  ctx.Options["source_repo"],
+		}
+		r.finishCredential(&cred, ctx, rulebooksDir, rawSlug)
+		results = append(results, cred)
+		logger.Info("discovered mdoc-only credential from catalog",
+			"org", ctx.Organization, "slug", slug,
+			"has_rulebook", cred.RulebookPath != "")
+	}
+
 	logger.Info("rulebook-catalog discovery complete",
 		"credentials", len(results))
 	return results, nil
+}
+
+// readSchemaDir returns the sorted file names in dir. A missing directory
+// yields no entries.
+func readSchemaDir(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names, nil
+}
+
+// finishCredential attaches the rulebook and the source-level metadata
+// (options) shared by every credential type.
+func (r *RulebookCatalog) finishCredential(cred *repoplugin.DiscoveredCredential, ctx repoplugin.Context, rulebooksDir, rawSlug string) {
+	rulebookCandidates := []string{
+		filepath.Join(rulebooksDir, "rb-"+cred.Slug, "README.md"),
+		filepath.Join(rulebooksDir, "rb-"+rawSlug, "README.md"),
+	}
+	for _, rbPath := range rulebookCandidates {
+		if _, statErr := os.Stat(rbPath); statErr == nil {
+			cred.RulebookPath = rbPath
+			break
+		}
+	}
+	cred.SchemaMetaSource = buildSchemaMetaFromOptions(ctx.Options, cred.Slug, ctx.BaseURL, ctx.Organization, cred.RulebookPath != "")
 }
 
 // discoverAssets searches for SVG templates, logos, and other visual assets

@@ -41,6 +41,13 @@ type CredentialData struct {
 	HasVC            bool
 	AvailableFormats []FormatInfo
 
+	// MdocTitle, MdocDescription and MdocDocType come from the mdoc schema
+	// of a credential that has no VCTM. They give such credentials a display
+	// name, a description and a document type.
+	MdocTitle       string
+	MdocDescription string
+	MdocDocType     string
+
 	// Source info
 	SourceURL  string
 	SourceOrg  string
@@ -50,6 +57,26 @@ type CredentialData struct {
 	// commit that touched this credential's source files. Empty if unknown
 	// (e.g. a local file:// source with no git history).
 	LastUpdated string
+}
+
+// DisplayName returns the VCTM name, then the mdoc schema title, then the slug.
+func (c CredentialData) DisplayName() string {
+	if c.VCTM != nil && c.VCTM.Name != "" {
+		return c.VCTM.Name
+	}
+	if c.VCTM == nil && c.MdocTitle != "" {
+		return c.MdocTitle
+	}
+	return c.Slug
+}
+
+// DisplayDescription returns the VCTM description, or the mdoc schema
+// description when the credential has no VCTM.
+func (c CredentialData) DisplayDescription() string {
+	if c.VCTM != nil {
+		return c.VCTM.Description
+	}
+	return c.MdocDescription
 }
 
 // AttributeData holds a single attribute (claim) with references to the
