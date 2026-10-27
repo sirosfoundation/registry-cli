@@ -66,6 +66,18 @@ func (r *RulebookCatalog) Discover(ctx repoplugin.Context) ([]repoplugin.Discove
 	var results []repoplugin.DiscoveredCredential
 	sdSlugs := make(map[string]bool)
 
+	// mdoc files by normalized slug, so an SD-JWT type finds its mdoc schema
+	// when only one of the two file names carries a dsNNN- prefix.
+	mdocBySlug := make(map[string]string)
+	for _, name := range mdocEntries {
+		if strings.HasSuffix(name, "-mdoc.json") {
+			slug := normalizeSlug(strings.TrimSuffix(name, "-mdoc.json"))
+			if _, ok := mdocBySlug[slug]; !ok {
+				mdocBySlug[slug] = name
+			}
+		}
+	}
+
 	// SD-JWT VC schemas: each one is a credential type.
 	for _, entry := range sdEntries {
 		if !strings.HasSuffix(entry, "-sd-jwt.json") {
@@ -113,6 +125,11 @@ func (r *RulebookCatalog) Discover(ctx repoplugin.Context) ([]repoplugin.Discove
 			if _, statErr := os.Stat(mdocPath); statErr == nil {
 				cred.FormatFiles["mso_mdoc"] = mdocPath
 				break
+			}
+		}
+		if _, found := cred.FormatFiles["mso_mdoc"]; !found {
+			if name, ok := mdocBySlug[slug]; ok {
+				cred.FormatFiles["mso_mdoc"] = filepath.Join(mdocDir, name)
 			}
 		}
 

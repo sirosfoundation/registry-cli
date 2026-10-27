@@ -55,6 +55,10 @@ func TestDiscover_MdocOnlyAndMixed(t *testing.T) {
 			"data-schemas/sd-jwt/ds002-pid-sd-jwt.json": minimalSDJWT,
 			"data-schemas/mdoc/pid-mdoc.json":           minimalMdoc},
 			nil, map[string][]string{"pid": {"dc+sd-jwt", "mso_mdoc"}}},
+		{"sd-jwt without prefix attaches prefixed mdoc", map[string]string{
+			"data-schemas/sd-jwt/pid-sd-jwt.json":   minimalSDJWT,
+			"data-schemas/mdoc/ds002-pid-mdoc.json": minimalMdoc},
+			nil, map[string][]string{"pid": {"dc+sd-jwt", "mso_mdoc"}}},
 		{"options apply to mdoc-only", map[string]string{
 			"data-schemas/mdoc/m-mdoc.json": minimalMdoc,
 			"rulebooks/rb-m/README.md":      "# m"},
