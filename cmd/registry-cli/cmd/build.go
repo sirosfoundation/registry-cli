@@ -16,6 +16,7 @@ import (
 	"github.com/sirosfoundation/registry-cli/pkg/attributes"
 	"github.com/sirosfoundation/registry-cli/pkg/discovery"
 	"github.com/sirosfoundation/registry-cli/pkg/mdcred"
+	"github.com/sirosfoundation/registry-cli/pkg/mdocinfo"
 	"github.com/sirosfoundation/registry-cli/pkg/render"
 	"github.com/sirosfoundation/registry-cli/pkg/repoplugin"
 	"github.com/sirosfoundation/registry-cli/pkg/schemameta"
@@ -831,16 +832,10 @@ func writeVCTMRegistryJSON(outputDir, baseURL string, credentials []render.Crede
 		}
 
 		// Derive name: prefer VCTM name, then slug
-		name := c.Slug
-		if c.VCTM != nil && c.VCTM.Name != "" {
-			name = c.VCTM.Name
-		}
+		name := c.DisplayName()
 
-		// Derive description from VCTM
-		description := ""
-		if c.VCTM != nil {
-			description = c.VCTM.Description
-		}
+		// Derive description from VCTM (or the mdoc schema without a VCTM)
+		description := c.DisplayDescription()
 
 		// Build formats map from available format files
 		formats := make(map[string]credFormat)
@@ -884,6 +879,10 @@ func writeVCTMRegistryJSON(outputDir, baseURL string, credentials []render.Crede
 		}
 
 		basePath := "/" + c.Org + "/" + c.Slug
+		metadataJSON := baseURL + basePath + ".vctm.json"
+		if c.VCTM == nil && c.HasMdoc {
+			metadataJSON = baseURL + basePath + ".mdoc.json"
+		}
 
 		cred := registryCredential{
 			VCT:          vct,
@@ -893,7 +892,7 @@ func writeVCTMRegistryJSON(outputDir, baseURL string, credentials []render.Crede
 			Formats:      formats,
 			Metadata: credMetadata{
 				HTML: baseURL + basePath + ".html",
-				JSON: baseURL + basePath + ".vctm.json",
+				JSON: metadataJSON,
 			},
 		}
 
@@ -1072,6 +1071,15 @@ func buildCredentialData(repos []discovery.ResolvedRepo, workDir, outputDir stri
 			if data, err := os.ReadFile(mdocPath); err == nil {
 				cred.RawMdocJSON = prettyFormatJSON(data)
 				cred.HasMdoc = true
+				if cred.VCTM == nil {
+					if info, infoErr := mdocinfo.Parse(data); infoErr == nil {
+						cred.MdocTitle = info.Title
+						cred.MdocDescription = info.Description
+						cred.MdocDocType = info.DocType
+					} else {
+						logger.Warn("invalid mdoc JSON", "file", mdocPath, "error", infoErr)
+					}
+				}
 			}
 
 			// Read W3C VC JSON
