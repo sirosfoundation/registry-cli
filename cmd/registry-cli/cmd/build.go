@@ -523,6 +523,15 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 			}
 		}
 
+		// A file:// source reuses its staging directory between builds: remove
+		// format files left by an earlier build whose schema is gone.
+		if len(vctmBytes) == 0 && cred.FormatFiles["dc+sd-jwt"] == "" {
+			_ = os.Remove(filepath.Join(credDir, cred.Slug+".vctm.json"))
+		}
+		if cred.FormatFiles["mso_mdoc"] == "" {
+			_ = os.Remove(filepath.Join(credDir, cred.Slug+".mdoc.json"))
+		}
+
 		// Stage generated VCTM
 		if len(vctmBytes) > 0 {
 			vctmPath := filepath.Join(credDir, cred.Slug+".vctm.json")

@@ -82,3 +82,43 @@ func TestBuild_MdocOnlyType(t *testing.T) {
 	assert.Contains(t, string(reg), `"name": "Vehicle Registration"`)
 	assert.Contains(t, string(reg), "mvrc.mdoc.json")
 }
+
+func TestBuild_MixedToMdocOnlyRebuildDropsStaleVCTM(t *testing.T) {
+	repo := t.TempDir()
+	put := func(rel, content string) {
+		p := filepath.Join(repo, rel)
+		require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
+		require.NoError(t, os.WriteFile(p, []byte(content), 0o644))
+	}
+	put("data-schemas/sd-jwt/car-sd-jwt.json", `{"title":"Car","type":"object","properties":{"vct":{"const":"urn:test:car"},"plate":{"type":"string"}}}`)
+	put("data-schemas/mdoc/car-mdoc.json", `{"title":"Car mdoc","docType":"org.test.car"}`)
+
+	srcYAML, err := yaml.Marshal(map[string]interface{}{"sources": []map[string]interface{}{{
+		"url": "file://" + repo, "organization": "testorg", "layout": "rulebook-catalog",
+	}}})
+	require.NoError(t, err)
+	srcFile := filepath.Join(t.TempDir(), "sources.yaml")
+	require.NoError(t, os.WriteFile(srcFile, srcYAML, 0o644))
+	oldOut, oldBase, oldSrc, oldTpl, oldStatic := flagOutput, flagBaseURL, flagSources, flagTemplates, flagStatic
+	t.Cleanup(func() {
+		flagOutput, flagBaseURL, flagSources, flagTemplates, flagStatic = oldOut, oldBase, oldSrc, oldTpl, oldStatic
+	})
+	build := func() string {
+		out := t.TempDir()
+		flagOutput, flagBaseURL, flagSources, flagTemplates, flagStatic = out, "https://registry.example.org", srcFile, "", ""
+		require.NoError(t, runBuild(nil, nil))
+		return out
+	}
+
+	out1 := build()
+	assert.FileExists(t, filepath.Join(out1, "testorg", "car.vctm.json"))
+
+	require.NoError(t, os.Remove(filepath.Join(repo, "data-schemas", "sd-jwt", "car-sd-jwt.json")))
+	out2 := build()
+	assert.NoFileExists(t, filepath.Join(out2, "testorg", "car.vctm.json"))
+	assert.FileExists(t, filepath.Join(out2, "testorg", "car.mdoc.json"))
+	page, err := os.ReadFile(filepath.Join(out2, "testorg", "car", "index.html"))
+	require.NoError(t, err)
+	assert.Contains(t, string(page), "Car mdoc")
+	assert.NotContains(t, string(page), "urn:test:car")
+}
