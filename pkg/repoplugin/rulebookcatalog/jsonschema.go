@@ -8,6 +8,42 @@ import (
 	"strings"
 )
 
+// schemaType holds a JSON Schema "type" keyword. JSON Schema core allows
+// either a single type name or an array of them, as in {"type": ["string",
+// "null"]}. Decoding only the string form makes the enclosing schema
+// unparsable, and because a conversion failure skips the whole credential, one
+// union type anywhere in a schema silently removes that attestation from the
+// published catalogue.
+type schemaType []string
+
+// UnmarshalJSON accepts both the string and the array form.
+func (t *schemaType) UnmarshalJSON(data []byte) error {
+	var single string
+	if err := json.Unmarshal(data, &single); err == nil {
+		*t = schemaType{single}
+		return nil
+	}
+
+	var many []string
+	if err := json.Unmarshal(data, &many); err != nil {
+		return fmt.Errorf("type must be a string or an array of strings, got %s", string(data))
+	}
+	*t = schemaType(many)
+
+	return nil
+}
+
+// Is reports whether the schema permits the named type.
+func (t schemaType) Is(name string) bool {
+	for _, candidate := range t {
+		if candidate == name {
+			return true
+		}
+	}
+
+	return false
+}
+
 // jsonSchema represents the subset of JSON Schema 2020-12 we need to parse
 // from EUDI-style credential validation schemas.
 type jsonSchema struct {
@@ -15,7 +51,7 @@ type jsonSchema struct {
 	ID          string                  `json:"$id"`
 	Title       string                  `json:"title"`
 	Description string                  `json:"description"`
-	Type        string                  `json:"type"`
+	Type        schemaType              `json:"type"`
 	Version     string                  `json:"version"`
 	Properties  map[string]*propertyDef `json:"properties"`
 	Required    []string                `json:"required"`
@@ -24,7 +60,7 @@ type jsonSchema struct {
 
 // propertyDef represents a property definition within a JSON Schema.
 type propertyDef struct {
-	Type        string                  `json:"type"`
+	Type        schemaType              `json:"type"`
 	Const       interface{}             `json:"const"`
 	Enum        []interface{}           `json:"enum"`
 	Description string                  `json:"description"`
@@ -104,8 +140,53 @@ var infrastructureClaims = map[string]bool{
 	"status": true,
 }
 
-// sdPattern matches descriptions indicating selective disclosure.
-var sdPattern = regexp.MustCompile(`(?i)(MUST be selectively disclos|selectively disclosable|SD claim)`)
+// Selective-disclosure policy is inferred from the prose of a property's
+// description, which is the only place the catalogue states it per claim. The
+// three patterns below are checked in the order never, always, allowed, so
+// that a prohibition always beats a requirement and a requirement beats a
+// permission.
+//
+// Matching the bare phrase "selectively disclosable" is not safe: it is a
+// substring of the prohibition, so it reports the exact opposite of what the
+// schema says. The patterns therefore bind the phrase to the modal verb in
+// front of it.
+var (
+	// sdNeverPattern matches a prohibition: "SHALL NOT be selectively
+	// disclosable", "NOT selectively disclosable", "are not selectively
+	// disclosable". "not" has to attach to the disclosure phrase itself,
+	// otherwise an unrelated "SHALL NOT be later than exp" in the same
+	// sentence would suppress disclosure.
+	sdNeverPattern = regexp.MustCompile(`(?i)\bnot\s+(be\s+)?(individually\s+)?selectively\s+disclos`)
+
+	// sdAlwaysPattern matches a requirement: "SHALL be selectively
+	// disclosable", "MUST be individually selectively disclosable",
+	// "issuer MUST make selectively disclosable", or an explicit "SD claim".
+	sdAlwaysPattern = regexp.MustCompile(`(?i)((shall|must)\s+(be\s+|make\s+)?(individually\s+)?selectively\s+disclos|\bSD\s+claim\b)`)
+
+	// sdAllowedPattern matches a permission: "MAY be selectively
+	// disclosable". This is the SD-JWT VC default, but stating it is worth
+	// more than leaving the claim silent, since silence cannot be told apart
+	// from a description that says nothing about disclosure at all.
+	sdAllowedPattern = regexp.MustCompile(`(?i)\b(may|can)\s+(be\s+)?(individually\s+)?selectively\s+disclos`)
+)
+
+// disclosureFor reads a selective-disclosure policy out of a property
+// description, returning the SD-JWT VC "sd" value or "" when the description
+// says nothing about disclosure.
+func disclosureFor(description string) string {
+	switch {
+	case description == "":
+		return ""
+	case sdNeverPattern.MatchString(description):
+		return "never"
+	case sdAlwaysPattern.MatchString(description):
+		return "always"
+	case sdAllowedPattern.MatchString(description):
+		return "allowed"
+	default:
+		return ""
+	}
+}
 
 // convertJSONSchemaToVCTM reads a JSON Schema file and produces VCTM JSON bytes.
 // assets maps discovered asset keys to their registry URLs (already resolved).
@@ -156,12 +237,10 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[s
 		}
 
 		// Detect selective disclosure from description
-		if propDef.Description != "" && sdPattern.MatchString(propDef.Description) {
-			claim.SD = "always"
-		}
+		claim.SD = disclosureFor(propDef.Description)
 
 		// Handle nested objects — add child claims
-		if propDef.Type == "object" && propDef.Properties != nil {
+		if propDef.Type.Is("object") && propDef.Properties != nil {
 			for childName, childDef := range propDef.Properties {
 				childClaim := vctmClaim{
 					Path: []interface{}{propName, childName},
@@ -172,9 +251,7 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[s
 				if childDef.Description != "" {
 					childClaim.Description = childDef.Description
 				}
-				if childDef.Description != "" && sdPattern.MatchString(childDef.Description) {
-					childClaim.SD = "always"
-				}
+				childClaim.SD = disclosureFor(childDef.Description)
 				claims = append(claims, childClaim)
 			}
 		}
