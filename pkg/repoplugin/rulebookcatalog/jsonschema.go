@@ -6,6 +6,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+
+	"github.com/sirosfoundation/registry-cli/pkg/repoplugin"
 )
 
 // schemaType holds a JSON Schema "type" keyword. JSON Schema core allows
@@ -190,7 +192,7 @@ func disclosureFor(description string) string {
 
 // convertJSONSchemaToVCTM reads a JSON Schema file and produces VCTM JSON bytes.
 // assets maps discovered asset keys to their registry URLs (already resolved).
-func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[string]string) ([]byte, error) {
+func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[string]string, disclosure *repoplugin.DisclosureOverride) ([]byte, error) {
 	data, err := os.ReadFile(schemaPath)
 	if err != nil {
 		return nil, fmt.Errorf("reading schema file: %w", err)
@@ -236,8 +238,14 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[s
 			claim.Mandatory = true
 		}
 
-		// Detect selective disclosure from description
-		claim.SD = disclosureFor(propDef.Description)
+		// An explicit override outranks the description, which is the only
+		// way to state a policy a rulebook fixes in prose rather than in
+		// the schema.
+		if sd, ok := disclosure.For([]string{propName}); ok {
+			claim.SD = sd
+		} else {
+			claim.SD = disclosureFor(propDef.Description)
+		}
 
 		// Handle nested objects — add child claims
 		if propDef.Type.Is("object") && propDef.Properties != nil {
@@ -251,7 +259,11 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[s
 				if childDef.Description != "" {
 					childClaim.Description = childDef.Description
 				}
-				childClaim.SD = disclosureFor(childDef.Description)
+				if sd, ok := disclosure.For([]string{propName, childName}); ok {
+					childClaim.SD = sd
+				} else {
+					childClaim.SD = disclosureFor(childDef.Description)
+				}
 				claims = append(claims, childClaim)
 			}
 		}

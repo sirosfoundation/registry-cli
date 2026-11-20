@@ -479,6 +479,7 @@ func processRepoWithPlugin(layoutName string, repo discovery.ResolvedRepo, repoD
 		Organization: org,
 		BaseURL:      baseURL,
 		Options:      options,
+		Credentials:  repo.Credentials,
 		Logger:       logger,
 	}
 

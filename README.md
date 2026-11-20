@@ -106,6 +106,48 @@ sources:
 | `path` | string | *(repo root)* | Restrict discovery to a subdirectory |
 | `layout` | string | `"default"` | Repo plugin name (see below) |
 | `options` | map | *(empty)* | Plugin-specific key-value configuration |
+| `credentials` | map | *(empty)* | Per-credential overrides, keyed by slug (see below) |
+
+#### Per-credential overrides
+
+`options` applies to every credential in a source. `credentials` overrides a
+single one, keyed by the slug the layout derives, for facts the published
+repository does not state in a machine-readable way.
+
+```yaml
+sources:
+  - url: "git:https://github.com/webuild-consortium/webuild-attestation-rulebooks-catalog.git"
+    organization: "webuild-consortium"
+    layout: "rulebook-catalog"
+    options:
+      attestation_los: "iso_18045_high"
+      binding_type: "key"
+    credentials:
+      ebwoid:
+        disclosure:
+          default: never
+      e-receipt:
+        disclosure:
+          claims:
+            receipt_number: never
+            merchant.name: always
+```
+
+**`disclosure`** sets the SD-JWT VC `sd` value on generated claims, one of
+`always`, `allowed` or `never`. `default` applies to every claim of the
+credential, including nested ones; `claims` applies to one claim each, by path
+joined with `.`, and wins over `default`. Both win over anything the generator
+infers from the schema.
+
+This exists because some rulebooks fix disclosure policy in prose rather than
+in the schema. EBWOID is the case it was written for: `rb-ebwoid` §4.5 and §5.1
+require the attestation to be presented atomically, with no attribute
+selectively disclosable, but its JSON Schema says nothing about disclosure. A
+generated VCTM therefore left `sd` unset, which SD-JWT VC §9.3 reads as
+`allowed` — the opposite of the rulebook.
+
+Values are checked when the manifest loads, so a typo fails the build rather
+than reaching wallets as a claim-level instruction.
 
 #### Available plugins
 

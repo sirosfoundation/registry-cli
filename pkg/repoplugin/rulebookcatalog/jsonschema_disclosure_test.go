@@ -168,7 +168,7 @@ func TestConvertJSONSchemaToVCTM_UnionTypeDoesNotSkipCredential(t *testing.T) {
 
 	path := writeTempSchema(t, schema)
 
-	out, err := convertJSONSchemaToVCTM(path, "union", "https://registry.example.org", "example", nil)
+	out, err := convertJSONSchemaToVCTM(path, "union", "https://registry.example.org", "example", nil, nil)
 	if err != nil {
 		t.Fatalf("conversion failed on a valid union type: %v", err)
 	}
