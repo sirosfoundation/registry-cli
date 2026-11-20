@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/sirosfoundation/registry-cli/pkg/repoplugin"
 	"gopkg.in/yaml.v3"
 )
 
@@ -41,6 +43,12 @@ type SourceEntry struct {
 	Path         string            `yaml:"path,omitempty"`
 	Layout       string            `yaml:"layout,omitempty"`
 	Options      map[string]string `yaml:"options,omitempty"`
+
+	// Credentials holds per-credential overrides, keyed by the slug the
+	// layout derives. It carries facts the published repository does not
+	// state in a machine-readable form, such as a disclosure policy that a
+	// rulebook fixes in prose.
+	Credentials map[string]repoplugin.CredentialOverride `yaml:"credentials,omitempty"`
 }
 
 // UnmarshalYAML allows SourceEntry to be parsed from either a plain string
@@ -63,6 +71,9 @@ type ResolvedRepo struct {
 	Path         string            // optional relative path within the repo to restrict credential discovery
 	Layout       string            // repo plugin layout name (empty = "default")
 	Options      map[string]string // layout-specific options from sources.yaml
+
+	// Credentials holds per-credential overrides from sources.yaml.
+	Credentials map[string]repoplugin.CredentialOverride
 }
 
 // Resolver resolves meta-sources into concrete repos.
@@ -86,7 +97,31 @@ func LoadManifest(path string) (*SourceManifest, error) {
 	if len(m.Sources) == 0 {
 		return nil, fmt.Errorf("sources manifest has no sources")
 	}
+	if err := m.validate(); err != nil {
+		return nil, fmt.Errorf("parsing sources manifest: %w", err)
+	}
 	return &m, nil
+}
+
+// validate checks the parts of the manifest that would otherwise fail late,
+// or silently. A disclosure value reaches wallets as a claim-level
+// instruction, so a typo is rejected here rather than published.
+func (m *SourceManifest) validate() error {
+	for _, entry := range m.Sources {
+		slugs := make([]string, 0, len(entry.Credentials))
+		for slug := range entry.Credentials {
+			slugs = append(slugs, slug)
+		}
+		sort.Strings(slugs)
+
+		for _, slug := range slugs {
+			if err := entry.Credentials[slug].Disclosure.Validate(slug); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 // ResolveAll resolves all sources in a manifest into concrete repos using
@@ -114,6 +149,7 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 				Path:         entry.Path,
 				Layout:       entry.Layout,
 				Options:      entry.Options,
+				Credentials:  entry.Credentials,
 			}
 			continue
 		}
@@ -137,6 +173,7 @@ func ResolveAll(manifest *SourceManifest, resolvers []Resolver) ([]ResolvedRepo,
 				Path:         entry.Path,
 				Layout:       entry.Layout,
 				Options:      entry.Options,
+				Credentials:  entry.Credentials,
 			}
 			continue
 		}

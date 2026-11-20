@@ -94,8 +94,11 @@ func (r *RulebookCatalog) Discover(ctx repoplugin.Context) ([]repoplugin.Discove
 		// Discover visual assets (SVG templates, logos)
 		assets, assetFiles := discoverAssets(repoDir, sdJWTDir, slug, rawSlug, ctx.BaseURL, ctx.Organization)
 
-		// Parse JSON Schema and convert to VCTM (including asset references)
-		vctmJSON, err := convertJSONSchemaToVCTM(schemaPath, slug, ctx.BaseURL, ctx.Organization, assets)
+		// Parse JSON Schema and convert to VCTM (including asset references).
+		// A disclosure override from sources.yaml, where present, outranks
+		// whatever the schema's prose implies.
+		disclosure := ctx.Credentials[slug].Disclosure
+		vctmJSON, err := convertJSONSchemaToVCTM(schemaPath, slug, ctx.BaseURL, ctx.Organization, assets, disclosure)
 		if err != nil {
 			logger.Warn("skipping credential: JSON Schema conversion failed",
 				"file", filename, "slug", slug, "error", err)

@@ -116,7 +116,7 @@ func TestConvertJSONSchemaToVCTM(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := convertJSONSchemaToVCTM(schemaPath, "test-cred", "https://registry.example.org", "test-org", nil)
+	result, err := convertJSONSchemaToVCTM(schemaPath, "test-cred", "https://registry.example.org", "test-org", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
