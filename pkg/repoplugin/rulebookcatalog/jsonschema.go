@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -83,6 +84,7 @@ type vctmClaim struct {
 	Description string         `json:"description,omitempty"`
 	Mandatory   bool           `json:"mandatory,omitempty"`
 	SD          string         `json:"sd,omitempty"`
+	SvgID       string         `json:"svg_id,omitempty"`
 }
 
 type claimDisplay struct {
@@ -132,9 +134,19 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[s
 		requiredSet[r] = true
 	}
 
-	// Build claims from properties
+	// Build claims from properties. Properties arrive in a map, so the order
+	// is sorted here for two reasons: generated metadata should be
+	// byte-identical between runs so that a republish shows a real diff, and
+	// the svg_id collision rule below is only stable if the order is.
+	propNames := make([]string, 0, len(schema.Properties))
+	for propName := range schema.Properties {
+		propNames = append(propNames, propName)
+	}
+	sort.Strings(propNames)
+
 	var claims []vctmClaim
-	for propName, propDef := range schema.Properties {
+	for _, propName := range propNames {
+		propDef := schema.Properties[propName]
 		if infrastructureClaims[propName] {
 			continue
 		}
@@ -162,7 +174,14 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[s
 
 		// Handle nested objects — add child claims
 		if propDef.Type == "object" && propDef.Properties != nil {
-			for childName, childDef := range propDef.Properties {
+			childNames := make([]string, 0, len(propDef.Properties))
+			for childName := range propDef.Properties {
+				childNames = append(childNames, childName)
+			}
+			sort.Strings(childNames)
+
+			for _, childName := range childNames {
+				childDef := propDef.Properties[childName]
 				childClaim := vctmClaim{
 					Path: []interface{}{propName, childName},
 					Display: []claimDisplay{
@@ -181,6 +200,8 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[s
 
 		claims = append(claims, claim)
 	}
+
+	assignSvgIDs(claims)
 
 	// Derive name from title
 	name := schema.Title
@@ -209,6 +230,114 @@ func convertJSONSchemaToVCTM(schemaPath, slug, baseURL, org string, assets map[s
 	}
 
 	return result, nil
+}
+
+// A svg_id is the handle a svg_template uses to address a claim: the wallet
+// builds svg_id -> claim path from the type metadata and substitutes every
+// {{svg_id}} in the template with that claim's value. Without one, a card
+// supplied through the asset convention has placeholders that bind to nothing,
+// so every generated claim gets an id here rather than leaving the designer to
+// guess.
+//
+// draft-ietf-oauth-sd-jwt-vc restricts the value to an identifier, so it is
+// also the one part of generated metadata that cannot simply carry the claim
+// path through.
+var (
+	svgIDShape   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	svgIDIllegal = regexp.MustCompile(`[^A-Za-z0-9_]`)
+)
+
+// assignSvgIDs gives each claim a template identifier, preferring the leaf
+// name because that is the short form a designer writes. A leaf that two
+// claims share - "name" under both issuer and subject, say - would be
+// ambiguous, so those claims fall back to the full path joined with
+// underscores. A claim whose path yields no usable identifier is left without
+// one; emitting a duplicate would silently bind a placeholder to whichever
+// claim came first.
+func assignSvgIDs(claims []vctmClaim) {
+	// A claim that other claims nest under is a container. It has no text
+	// value to substitute, so giving it an id would only invite a template to
+	// address it.
+	container := make(map[string]bool, len(claims))
+	for _, claim := range claims {
+		for i := 1; i < len(claim.Path); i++ {
+			container[pathJoined(claim.Path[:i])] = true
+		}
+	}
+
+	leaves := make(map[string]int, len(claims))
+	for _, claim := range claims {
+		if container[pathJoined(claim.Path)] {
+			continue
+		}
+		leaves[pathLeaf(claim.Path)]++
+	}
+
+	used := make(map[string]bool, len(claims))
+	for i := range claims {
+		if container[pathJoined(claims[i].Path)] {
+			continue
+		}
+
+		leaf := pathLeaf(claims[i].Path)
+		candidate := leaf
+		if leaves[leaf] > 1 {
+			candidate = pathJoined(claims[i].Path)
+		}
+
+		id := sanitizeSvgID(candidate)
+		if id == "" || used[id] {
+			continue
+		}
+
+		claims[i].SvgID = id
+		used[id] = true
+	}
+}
+
+// pathLeaf returns the last named segment of a claim path. Array indices and
+// the null wildcard are not names, so they are skipped.
+func pathLeaf(path []interface{}) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		if name, ok := path[i].(string); ok && name != "" {
+			return name
+		}
+	}
+
+	return ""
+}
+
+// pathJoined flattens a claim path into a single underscore-separated name.
+func pathJoined(path []interface{}) string {
+	parts := make([]string, 0, len(path))
+	for _, segment := range path {
+		if name, ok := segment.(string); ok && name != "" {
+			parts = append(parts, name)
+		}
+	}
+
+	return strings.Join(parts, "_")
+}
+
+// sanitizeSvgID coerces a name into the identifier shape, returning "" when
+// nothing usable is left.
+func sanitizeSvgID(name string) string {
+	id := svgIDIllegal.ReplaceAllString(name, "_")
+	if id == "" {
+		return ""
+	}
+
+	// A leading digit is the only remaining way to fail the shape, and
+	// prefixing an underscore keeps the rest of the name readable.
+	if !svgIDShape.MatchString(id) {
+		id = "_" + id
+	}
+
+	if !svgIDShape.MatchString(id) {
+		return ""
+	}
+
+	return id
 }
 
 // extractVCT gets the VCT identifier from the schema's vct property.
