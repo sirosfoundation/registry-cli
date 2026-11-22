@@ -203,6 +203,24 @@ The VCTM lists the cards under `display[].rendering.svg_templates[]` (light and 
 
 SVG cards are checked before publication, see [SVG and Image URI Validation](#svg-and-image-uri-validation). A card that fails a check is skipped with a logged warning and its reference is removed from the VCTM, so the published VCTM contains working links only.
 
+**Template placeholders (`svg_id`):**
+
+A card binds to data through `svg_id`: the wallet builds an `svg_id` -> claim
+path map from the type metadata and substitutes every `{{svg_id}}` in the SVG
+with that claim's value, so a placeholder with no matching `svg_id` renders
+nothing. Every generated claim therefore carries one, derived from its path:
+
+| Claim path | `svg_id` |
+|------------|----------|
+| `legal_person_name` | `legal_person_name` |
+| `share_capital.amount` | `amount` (the leaf, which is what a template writes) |
+| `issuer.name` and `subject.name` | `issuer_name`, `subject_name` (a shared leaf is ambiguous, so both carry the path) |
+| `1st_line` | `_1st_line` (`svg_id` must start with a letter or underscore) |
+| `share_capital` | *(none - a container has no value to substitute)* |
+
+The published VCTM is the reference for whoever draws the card: its `svg_id`
+values are the complete set of placeholders available.
+
 **Plugin options:**
 
 | Option | Description |

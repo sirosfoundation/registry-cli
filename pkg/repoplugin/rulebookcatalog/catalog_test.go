@@ -302,3 +302,144 @@ func TestDiscoverAssets_TrimsTrailingSlashOfBaseURL(t *testing.T) {
 		t.Error("asset file not recorded")
 	}
 }
+
+// A nested claim and a repeated leaf are the two cases where the short form a
+// designer would write is not usable, so both are covered here along with the
+// ordinary one.
+func TestConvertJSONSchemaToVCTM_SvgIDs(t *testing.T) {
+	schema := map[string]interface{}{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type":    "object",
+		"properties": map[string]interface{}{
+			"vct": map[string]interface{}{
+				"type":  "string",
+				"const": "urn:test:credential:1",
+			},
+			"legal_person_name": map[string]interface{}{"type": "string"},
+			"1st_line":          map[string]interface{}{"type": "string"},
+			"issuer": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{"type": "string"},
+					"id":   map[string]interface{}{"type": "string"},
+				},
+			},
+			"subject": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{"type": "string"},
+				},
+			},
+		},
+	}
+
+	tmpDir := t.TempDir()
+	schemaPath := filepath.Join(tmpDir, "test-cred-sd-jwt.json")
+	data, _ := json.MarshalIndent(schema, "", "  ")
+	if err := os.WriteFile(schemaPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := convertJSONSchemaToVCTM(schemaPath, "test-cred", "https://registry.example.org", "test-org", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var vctm vctmOutput
+	if err := json.Unmarshal(result, &vctm); err != nil {
+		t.Fatalf("unmarshaling result: %v", err)
+	}
+
+	byPath := make(map[string]string, len(vctm.Claims))
+	for _, claim := range vctm.Claims {
+		byPath[pathJoined(claim.Path)] = claim.SvgID
+	}
+
+	want := map[string]string{
+		// The ordinary case: the claim name is already an identifier.
+		"legal_person_name": "legal_person_name",
+		// A nested claim with a unique leaf is addressed by that leaf, so a
+		// designer writes {{id}} rather than the path.
+		"issuer_id": "id",
+		// "name" appears under two parents, so neither may claim the short
+		// form; both carry the full path.
+		"issuer_name":  "issuer_name",
+		"subject_name": "subject_name",
+		// A leading digit is not a legal identifier start.
+		"1st_line": "_1st_line",
+	}
+	for path, wantID := range want {
+		if got, ok := byPath[path]; !ok {
+			t.Errorf("claim %q not found", path)
+		} else if got != wantID {
+			t.Errorf("claim %q svg_id = %q, want %q", path, got, wantID)
+		}
+	}
+
+	// The two object claims are containers, so they carry no id.
+	for _, path := range []string{"issuer", "subject"} {
+		if got := byPath[path]; got != "" {
+			t.Errorf("container claim %q should have no svg_id, got %q", path, got)
+		}
+	}
+
+	seen := make(map[string]string, len(vctm.Claims))
+	for _, claim := range vctm.Claims {
+		if claim.SvgID == "" {
+			continue
+		}
+		if !svgIDShape.MatchString(claim.SvgID) {
+			t.Errorf("claim %q svg_id %q is not an identifier", pathJoined(claim.Path), claim.SvgID)
+		}
+		if other, dup := seen[claim.SvgID]; dup {
+			t.Errorf("svg_id %q used by both %q and %q", claim.SvgID, other, pathJoined(claim.Path))
+		}
+		seen[claim.SvgID] = pathJoined(claim.Path)
+	}
+}
+
+// Generated metadata is committed and republished, so a run that changes only
+// the claim order would show up as a diff with no content behind it.
+func TestConvertJSONSchemaToVCTM_IsDeterministic(t *testing.T) {
+	schema := map[string]interface{}{
+		"$schema": "https://json-schema.org/draft/2020-12/schema",
+		"type":    "object",
+		"properties": map[string]interface{}{
+			"vct":   map[string]interface{}{"type": "string", "const": "urn:test:credential:1"},
+			"alpha": map[string]interface{}{"type": "string"},
+			"bravo": map[string]interface{}{"type": "string"},
+			"delta": map[string]interface{}{"type": "string"},
+			"echo":  map[string]interface{}{"type": "string"},
+			"nested": map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"one":   map[string]interface{}{"type": "string"},
+					"two":   map[string]interface{}{"type": "string"},
+					"three": map[string]interface{}{"type": "string"},
+				},
+			},
+		},
+	}
+
+	tmpDir := t.TempDir()
+	schemaPath := filepath.Join(tmpDir, "test-cred-sd-jwt.json")
+	data, _ := json.MarshalIndent(schema, "", "  ")
+	if err := os.WriteFile(schemaPath, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := convertJSONSchemaToVCTM(schemaPath, "test-cred", "https://registry.example.org", "test-org", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 20; i++ {
+		again, err := convertJSONSchemaToVCTM(schemaPath, "test-cred", "https://registry.example.org", "test-org", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(again) != string(first) {
+			t.Fatalf("run %d differs from the first run", i+2)
+		}
+	}
+}
