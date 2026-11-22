@@ -15,9 +15,11 @@ package rulebookcatalog
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/sirosfoundation/registry-cli/pkg/mdocinfo"
@@ -94,8 +96,11 @@ func (r *RulebookCatalog) Discover(ctx repoplugin.Context) ([]repoplugin.Discove
 		// Discover visual assets (SVG templates, logos)
 		assets, assetFiles := discoverAssets(repoDir, sdJWTDir, slug, rawSlug, ctx.BaseURL, ctx.Organization)
 
-		// Parse JSON Schema and convert to VCTM (including asset references)
-		vctmJSON, err := convertJSONSchemaToVCTM(schemaPath, slug, ctx.BaseURL, ctx.Organization, assets)
+		// Parse JSON Schema and convert to VCTM (including asset references).
+		// A disclosure override from sources.yaml, where present, outranks
+		// whatever the schema's prose implies.
+		disclosure := ctx.Credentials[slug].Disclosure
+		vctmJSON, err := convertJSONSchemaToVCTM(schemaPath, slug, ctx.BaseURL, ctx.Organization, assets, disclosure)
 		if err != nil {
 			logger.Warn("skipping credential: JSON Schema conversion failed",
 				"file", filename, "slug", slug, "error", err)
@@ -187,9 +192,47 @@ func (r *RulebookCatalog) Discover(ctx repoplugin.Context) ([]repoplugin.Discove
 			"has_rulebook", cred.RulebookPath != "")
 	}
 
+	warnUnmatchedOverrides(ctx, results, logger)
+
 	logger.Info("rulebook-catalog discovery complete",
 		"credentials", len(results))
 	return results, nil
+}
+
+// warnUnmatchedOverrides reports a sources.yaml override keyed by a slug no
+// credential has. The lookup is a plain map index, so a typo or the wrong
+// case - "einvoice" where the catalogue yields "eInvoice" - applies nothing
+// and changes nothing in the output, which is indistinguishable from the
+// override having worked.
+func warnUnmatchedOverrides(ctx repoplugin.Context, results []repoplugin.DiscoveredCredential, logger *slog.Logger) {
+	if len(ctx.Credentials) == 0 {
+		return
+	}
+
+	found := make(map[string]bool, len(results))
+	for _, cred := range results {
+		found[cred.Slug] = true
+	}
+
+	unmatched := make([]string, 0, len(ctx.Credentials))
+	for slug := range ctx.Credentials {
+		if !found[slug] {
+			unmatched = append(unmatched, slug)
+		}
+	}
+	if len(unmatched) == 0 {
+		return
+	}
+	sort.Strings(unmatched)
+
+	known := make([]string, 0, len(found))
+	for slug := range found {
+		known = append(known, slug)
+	}
+	sort.Strings(known)
+
+	logger.Warn("sources.yaml has credential overrides for slugs this source does not produce; they had no effect",
+		"org", ctx.Organization, "unmatched", unmatched, "known", known)
 }
 
 // readSchemaDir returns the sorted file names in dir. A missing directory

@@ -79,6 +79,10 @@ type Context struct {
 	// Plugins parse their own options from this map.
 	Options map[string]string
 
+	// Credentials holds per-credential overrides from sources.yaml, keyed by
+	// the slug the plugin derives for a credential.
+	Credentials map[string]CredentialOverride
+
 	// Logger for structured logging.
 	Logger *slog.Logger
 }
