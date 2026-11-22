@@ -139,6 +139,13 @@ credential, including nested ones; `claims` applies to one claim each, by path
 joined with `.`, and wins over `default`. Both win over anything the generator
 infers from the schema.
 
+The key is the slug exactly as the layout derives it, case included. For
+`rulebook-catalog` that is the schema's file name without `-sd-jwt.json` and
+without any `dsNNN-` prefix, so `eInvoice-sd-jwt.json` is keyed `eInvoice`,
+not `einvoice`. An override keyed by a slug no credential has applies nothing;
+the build logs a warning naming it alongside the slugs that do exist, since
+otherwise it is indistinguishable from an override that worked.
+
 This exists because some rulebooks fix disclosure policy in prose rather than
 in the schema. EBWOID is the case it was written for: `rb-ebwoid` §4.5 and §5.1
 require the attestation to be presented atomically, with no attribute
